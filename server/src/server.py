@@ -1,4 +1,5 @@
 import os
+from dotenv import load_dotenv
 import io
 import hashlib
 import datetime as dt
@@ -26,6 +27,7 @@ except Exception:  # dill is optional
 import watermarking_utils as WMUtils
 from watermarking_method import WatermarkingMethod
 
+load_dotenv()
 
 # from watermarking_utils import METHODS, apply_watermark, read_watermark, explore_pdf, is_watermarking_applicable, get_method
 
@@ -33,7 +35,13 @@ def create_app():
     app = Flask(__name__)
 
     # --- Config ---
-    app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+    # Securely load the secret key
+    SECRET_KEY = os.environ.get("SECRET_KEY")
+    if not SECRET_KEY:
+        # If the key is not found, raise an error instead of using a weak default.
+        raise ValueError("No SECRET_KEY set for the application. Please create a .env file.")
+
+    app.config["SECRET_KEY"] = SECRET_KEY
     app.config["STORAGE_DIR"] = Path(os.environ.get("STORAGE_DIR", "./storage")).resolve()
     app.config["TOKEN_TTL_SECONDS"] = int(os.environ.get("TOKEN_TTL_SECONDS", "86400"))
 
