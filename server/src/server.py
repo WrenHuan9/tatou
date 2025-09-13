@@ -5,7 +5,10 @@ import datetime as dt
 from pathlib import Path
 from functools import wraps
 
-from flask import Flask, jsonify, request, g, send_file
+# << ADDED FOR SECURITY: Import Response for headers and CSRFProtect for CSRF
+from flask import Flask, jsonify, request, g, send_file, Response
+from flask_wtf.csrf import CSRFProtect
+
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
@@ -14,15 +17,17 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 
 import pickle as _std_pickle
+
 try:
     import dill as _pickle  # allows loading classes not importable by module path
 except Exception:  # dill is optional
     _pickle = _std_pickle
 
-
 import watermarking_utils as WMUtils
 from watermarking_method import WatermarkingMethod
-#from watermarking_utils import METHODS, apply_watermark, read_watermark, explore_pdf, is_watermarking_applicable, get_method
+
+
+# from watermarking_utils import METHODS, apply_watermark, read_watermark, explore_pdf, is_watermarking_applicable, get_method
 
 def create_app():
     app = Flask(__name__)
@@ -32,6 +37,14 @@ def create_app():
     app.config["STORAGE_DIR"] = Path(os.environ.get("STORAGE_DIR", "./storage")).resolve()
     app.config["TOKEN_TTL_SECONDS"] = int(os.environ.get("TOKEN_TTL_SECONDS", "86400"))
 
+    # << ADDED FOR SECURITY: Configure secure cookies
+    app.config.update(
+        SESSION_COOKIE_HTTPONLY=True,  # Prevent JavaScript from accessing the session cookie.
+        SESSION_COOKIE_SAMESITE='Lax',
+        # Protect against CSRF attacks. 'Strict' is more secure but can affect usability.
+        SESSION_COOKIE_SECURE=True  # Only send cookie over HTTPS. Comment this out for local HTTP development.
+    )
+
     app.config["DB_USER"] = os.environ.get("DB_USER", "tatou")
     app.config["DB_PASSWORD"] = os.environ.get("DB_PASSWORD", "tatou")
     app.config["DB_HOST"] = os.environ.get("DB_HOST", "db")
@@ -39,6 +52,10 @@ def create_app():
     app.config["DB_NAME"] = os.environ.get("DB_NAME", "tatou")
 
     app.config["STORAGE_DIR"].mkdir(parents=True, exist_ok=True)
+
+    # << ADDED FOR SECURITY: Initialize CSRF Protection for the app
+    # This will protect all POST/PUT/DELETE requests made via forms.
+    csrf = CSRFProtect(app)
 
     # --- DB engine only (no Table metadata) ---
     def db_url() -> str:
@@ -76,6 +93,7 @@ def create_app():
                 return _auth_error("Invalid token")
             g.user = {"id": int(data["uid"]), "login": data["login"], "email": data.get("email")}
             return f(*args, **kwargs)
+
         return wrapper
 
     def _sha256_file(path: Path) -> str:
@@ -85,8 +103,21 @@ def create_app():
                 h.update(chunk)
         return h.hexdigest()
 
+    # << ADDED FOR SECURITY: This function adds security headers to every response.
+    @app.after_request
+    def add_security_headers(response: Response):
+        # Prevents your site from being put in an iframe on other sites (clickjacking protection).
+        response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+        # Prevents the browser from guessing the content type of a file.
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        # A basic Content Security Policy to only allow resources (like scripts) from your own domain.
+        response.headers['Content-Security-Policy'] = "default-src 'self'"
+        # Forces browsers to use HTTPS for the next year. Only enable this when you have HTTPS set up.
+        # response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+        return response
+
     # --- Routes ---
-    
+
     @app.route("/<path:filename>")
     def static_files(filename):
         return app.send_static_file(filename)
@@ -94,7 +125,11 @@ def create_app():
     @app.route("/")
     def home():
         return app.send_static_file("index.html")
-    
+
+    # ... (THE REST OF YOUR CODE REMAINS EXACTLY THE SAME) ...
+    # ... I have removed the rest of the file from this view for brevity, ...
+    # ... but you should keep it in your file.                        ...
+
     @app.get("/healthz")
     def healthz():
         try:
@@ -245,8 +280,6 @@ def create_app():
         } for r in rows]
         return jsonify({"documents": docs}), 200
 
-
-
     # GET /api/list-versions
     @app.get("/api/list-versions")
     @app.get("/api/list-versions/<int:document_id>")
@@ -259,7 +292,7 @@ def create_app():
                 document_id = int(document_id)
             except (TypeError, ValueError):
                 return jsonify({"error": "document id required"}), 400
-        
+
         try:
             with get_engine().connect() as conn:
                 rows = conn.execute(
@@ -284,8 +317,7 @@ def create_app():
             "method": r.method,
         } for r in rows]
         return jsonify({"versions": versions}), 200
-    
-    
+
     # GET /api/list-all-versions
     @app.get("/api/list-all-versions")
     @require_auth
@@ -313,13 +345,13 @@ def create_app():
             "method": r.method,
         } for r in rows]
         return jsonify({"versions": versions}), 200
-    
+
     # GET /api/get-document or /api/get-document/<id>  → returns the PDF (inline)
     @app.get("/api/get-document")
     @app.get("/api/get-document/<int:document_id>")
     @require_auth
     def get_document(document_id: int | None = None):
-    
+
         # Support both path param and ?id=/ ?documentid=
         if document_id is None:
             document_id = request.args.get("id") or request.args.get("documentid")
@@ -327,7 +359,7 @@ def create_app():
                 document_id = int(document_id)
             except (TypeError, ValueError):
                 return jsonify({"error": "document id required"}), 400
-        
+
         try:
             with get_engine().connect() as conn:
                 row = conn.execute(
@@ -364,7 +396,7 @@ def create_app():
             mimetype="application/pdf",
             as_attachment=False,
             download_name=row.name if row.name.lower().endswith(".pdf") else f"{row.name}.pdf",
-            conditional=True,   # enables 304 if If-Modified-Since/Range handling
+            conditional=True,  # enables 304 if If-Modified-Since/Range handling
             max_age=0,
             last_modified=file_path.stat().st_mtime,
         )
@@ -374,11 +406,11 @@ def create_app():
 
         resp.headers["Cache-Control"] = "private, max-age=0, must-revalidate"
         return resp
-    
+
     # GET /api/get-version/<link>  → returns the watermarked PDF (inline)
     @app.get("/api/get-version/<link>")
     def get_version(link: str):
-        
+
         try:
             with get_engine().connect() as conn:
                 row = conn.execute(
@@ -415,14 +447,14 @@ def create_app():
             mimetype="application/pdf",
             as_attachment=False,
             download_name=row.link if row.link.lower().endswith(".pdf") else f"{row.link}.pdf",
-            conditional=True,   # enables 304 if If-Modified-Since/Range handling
+            conditional=True,  # enables 304 if If-Modified-Since/Range handling
             max_age=0,
             last_modified=file_path.stat().st_mtime,
         )
 
         resp.headers["Cache-Control"] = "private, max-age=0"
         return resp
-    
+
     # Helper: resolve path safely under STORAGE_DIR (handles absolute/relative)
     def _safe_resolve_under_storage(p: str, storage_root: Path) -> Path:
         storage_root = storage_root.resolve()
@@ -448,9 +480,9 @@ def create_app():
         # accept id from path, query (?id= / ?documentid=), or JSON body on POST
         if not document_id:
             document_id = (
-                request.args.get("id")
-                or request.args.get("documentid")
-                or (request.is_json and (request.get_json(silent=True) or {}).get("id"))
+                    request.args.get("id")
+                    or request.args.get("documentid")
+                    or (request.is_json and (request.get_json(silent=True) or {}).get("id"))
             )
         try:
             doc_id = document_id
@@ -505,10 +537,9 @@ def create_app():
             "id": doc_id,
             "file_deleted": file_deleted,
             "file_missing": file_missing,
-            "note": delete_error,   # null/omitted if everything was fine
+            "note": delete_error,  # null/omitted if everything was fine
         }), 200
-        
-        
+
     # POST /api/create-watermark or /api/create-watermark/<id>  → create watermarked pdf and returns metadata
     @app.post("/api/create-watermark")
     @app.post("/api/create-watermark/<int:document_id>")
@@ -517,15 +548,15 @@ def create_app():
         # accept id from path, query (?id= / ?documentid=), or JSON body on GET
         if not document_id:
             document_id = (
-                request.args.get("id")
-                or request.args.get("documentid")
-                or (request.is_json and (request.get_json(silent=True) or {}).get("id"))
+                    request.args.get("id")
+                    or request.args.get("documentid")
+                    or (request.is_json and (request.get_json(silent=True) or {}).get("id"))
             )
         try:
             doc_id = document_id
         except (TypeError, ValueError):
             return jsonify({"error": "document id required"}), 400
-            
+
         payload = request.get_json(silent=True) or {}
         # allow a couple of aliases for convenience
         method = payload.get("method")
@@ -654,8 +685,7 @@ def create_app():
             "filename": candidate,
             "size": len(wm_bytes),
         }), 201
-        
-        
+
     @app.post("/api/load-plugin")
     @require_auth
     def load_plugin():
@@ -708,11 +738,12 @@ def create_app():
         else:
             is_ok = has_api
         if not is_ok:
-            return jsonify({"error": "plugin does not implement WatermarkingMethod API (add_watermark/read_secret)"}), 400
-            
+            return jsonify(
+                {"error": "plugin does not implement WatermarkingMethod API (add_watermark/read_secret)"}), 400
+
         # Register the class (not an instance) so you can instantiate as needed later
         WMUtils.METHODS[method_name] = cls()
-        
+
         return jsonify({
             "loaded": True,
             "filename": filename,
@@ -720,9 +751,7 @@ def create_app():
             "class_qualname": f"{getattr(cls, '__module__', '?')}.{getattr(cls, '__qualname__', cls.__name__)}",
             "methods_count": len(WMUtils.METHODS)
         }), 201
-        
-    
-    
+
     # GET /api/get-watermarking-methods -> {"methods":[{"name":..., "description":...}, ...], "count":N}
     @app.get("/api/get-watermarking-methods")
     def get_watermarking_methods():
@@ -730,9 +759,9 @@ def create_app():
 
         for m in WMUtils.METHODS:
             methods.append({"name": m, "description": WMUtils.get_method(m).get_usage()})
-            
+
         return jsonify({"methods": methods, "count": len(methods)}), 200
-        
+
     # POST /api/read-watermark
     @app.post("/api/read-watermark")
     @app.post("/api/read-watermark/<int:document_id>")
@@ -741,15 +770,15 @@ def create_app():
         # accept id from path, query (?id= / ?documentid=), or JSON body on POST
         if not document_id:
             document_id = (
-                request.args.get("id")
-                or request.args.get("documentid")
-                or (request.is_json and (request.get_json(silent=True) or {}).get("id"))
+                    request.args.get("id")
+                    or request.args.get("documentid")
+                    or (request.is_json and (request.get_json(silent=True) or {}).get("id"))
             )
         try:
             doc_id = document_id
         except (TypeError, ValueError):
             return jsonify({"error": "document id required"}), 400
-            
+
         payload = request.get_json(silent=True) or {}
         # allow a couple of aliases for convenience
         method = payload.get("method")
@@ -793,7 +822,7 @@ def create_app():
             return jsonify({"error": "document path invalid"}), 500
         if not file_path.exists():
             return jsonify({"error": "file missing on disk"}), 410
-        
+
         secret = None
         try:
             secret = WMUtils.read_watermark(
@@ -811,7 +840,7 @@ def create_app():
         }), 201
 
     return app
-    
+
 
 # WSGI entrypoint
 app = create_app()
@@ -819,4 +848,3 @@ app = create_app()
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
