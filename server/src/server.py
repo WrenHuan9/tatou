@@ -5,7 +5,10 @@ import datetime as dt
 from pathlib import Path
 from functools import wraps
 
-from flask import Flask, jsonify, request, g, send_file
+# << ADDED FOR SECURITY: Import Response for headers and CSRFProtect for CSRF
+from flask import Flask, jsonify, request, g, send_file, Response
+from flask_wtf.csrf import CSRFProtect
+
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
@@ -31,6 +34,13 @@ def create_app():
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
     app.config["STORAGE_DIR"] = Path(os.environ.get("STORAGE_DIR", "./storage")).resolve()
     app.config["TOKEN_TTL_SECONDS"] = int(os.environ.get("TOKEN_TTL_SECONDS", "86400"))
+    
+    # << ADDED FOR SECURITY: Configure secure cookies
+    app.config.update(
+        SESSION_COOKIE_HTTPONLY=True,       # Prevent JavaScript from accessing the session cookie.
+        SESSION_COOKIE_SAMESITE='Lax',      # Protect against CSRF attacks. 'Strict' is more secure but can affect usability.
+        SESSION_COOKIE_SECURE=True          # Only send cookie over HTTPS. Comment this out for local HTTP development.
+    )
 
     app.config["DB_USER"] = os.environ.get("DB_USER", "tatou")
     app.config["DB_PASSWORD"] = os.environ.get("DB_PASSWORD", "tatou")
@@ -39,6 +49,10 @@ def create_app():
     app.config["DB_NAME"] = os.environ.get("DB_NAME", "tatou")
 
     app.config["STORAGE_DIR"].mkdir(parents=True, exist_ok=True)
+    
+    # << ADDED FOR SECURITY: Initialize CSRF Protection for the app
+    # This will protect all POST/PUT/DELETE requests made via forms.
+    csrf = CSRFProtect(app)
 
     # --- DB engine only (no Table metadata) ---
     def db_url() -> str:
@@ -85,6 +99,19 @@ def create_app():
                 h.update(chunk)
         return h.hexdigest()
 
+    # << ADDED FOR SECURITY: This function adds security headers to every response.
+    @app.after_request
+    def add_security_headers(response: Response):
+        # Prevents your site from being put in an iframe on other sites (clickjacking protection).
+        response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+        # Prevents the browser from guessing the content type of a file.
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        # A basic Content Security Policy to only allow resources (like scripts) from your own domain.
+        response.headers['Content-Security-Policy'] = "default-src 'self'"
+        # Forces browsers to use HTTPS for the next year. Only enable this when you have HTTPS set up.
+        # response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+        return response
+
     # --- Routes ---
     
     @app.route("/<path:filename>")
@@ -95,6 +122,10 @@ def create_app():
     def home():
         return app.send_static_file("index.html")
     
+    # ... (THE REST OF YOUR CODE REMAINS EXACTLY THE SAME) ...
+    # ... I have removed the rest of the file from this view for brevity, ...
+    # ... but you should keep it in your file.                        ...
+
     @app.get("/healthz")
     def healthz():
         try:
@@ -721,8 +752,7 @@ def create_app():
             "methods_count": len(WMUtils.METHODS)
         }), 201
         
-    
-    
+        
     # GET /api/get-watermarking-methods -> {"methods":[{"name":..., "description":...}, ...], "count":N}
     @app.get("/api/get-watermarking-methods")
     def get_watermarking_methods():
@@ -819,4 +849,3 @@ app = create_app()
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
