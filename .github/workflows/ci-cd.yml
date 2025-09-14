@@ -344,7 +344,7 @@ jobs:
     - name: Generate SBOM
       uses: aquasecurity/trivy-action@master
       with:
-        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ steps.sha.outputs.sha_short }}
+        image-ref: ${{ env.REGISTRY }}/${{ tolower(env.IMAGE_NAME) }}:sha-${{ steps.sha.outputs.sha_short }}
         scan-type: 'image'
         format: 'spdx-json'
         output: 'sbom.json'
@@ -366,7 +366,7 @@ jobs:
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@master
       with:
-        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ steps.sha.outputs.sha_short }}
+        image-ref: ${{ env.REGISTRY }}/${{ tolower(env.IMAGE_NAME) }}:sha-${{ steps.sha.outputs.sha_short }}
         scan-type: 'image'
         format: 'sarif'
         output: 'trivy-results.sarif'
@@ -382,6 +382,6 @@ jobs:
       env:
         SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
       with:
-        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ steps.sha.outputs.sha_short }}
+        image: ${{ env.REGISTRY }}/${{ tolower(env.IMAGE_NAME) }}:sha-${{ steps.sha.outputs.sha_short }}
         args: --severity-threshold=high
       continue-on-error: true
