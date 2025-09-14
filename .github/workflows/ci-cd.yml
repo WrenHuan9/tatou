@@ -310,9 +310,8 @@ jobs:
         tags: |
           type=ref,event=branch
           type=ref,event=pr
-          type=sha,prefix={{branch}}-
+          type=sha
           type=raw,value=latest,enable={{is_default_branch}}
-          type=raw,value=stable,enable=${{ github.ref == 'refs/heads/main' }}
         labels: |
           org.opencontainers.image.title=Tatou PDF Watermarking Platform
           org.opencontainers.image.description=A web platform for PDF watermarking
