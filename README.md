@@ -45,7 +45,7 @@ cp sample.env .env
 # Rebuild the docker image and deploy the containers
 docker compose up --build -d
 
-# Monitor logs in realtime 
+# Monitor logs in realtime
 docker compose logs -f
 
 # Test if the API is up
@@ -53,6 +53,3 @@ http -v :5000/healthz
 
 # Open your browser at 127.0.0.1:5000 to check if the website is up.
 ```
-
-
-

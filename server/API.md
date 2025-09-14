@@ -35,10 +35,10 @@
 **Path**
 `GET /api/healthz`
 
-**Description**  
+**Description**
 This endpoint checks the health of the server and confirms it is running.
 
-**Parameters**  
+**Parameters**
 _None_
 
 **Return**
@@ -51,13 +51,13 @@ _None_
 **Specification**
  * The healthz endpoint MUST be accessible without authentication.
  * The response MUST always contain a "message" field of type string.
- 
+
  ## create-user
- 
+
 **Path**
 `POST /api/create-user`
 
-**Description**  
+**Description**
 This endpoint creates a new user account in the system.
 
 **Parameters**
@@ -89,7 +89,7 @@ This endpoint creates a new user account in the system.
 **Path**
 `POST /api/login`
 
-**Description**  
+**Description**
 This endpoint authenticates a user with their credentials and returns a session token.
 
 **Parameters**
@@ -112,13 +112,13 @@ This endpoint authenticates a user with their credentials and returns a session 
 **Specification**
  * The login endpoint MUST reject requests missing email or password.
  * The response MUST include a token string and its expiration date as an integer Time To Live in seconds.
- 
+
  ## upload-document
 
 **Path**
 `POST /api/upload-document`
 
-**Description**  
+**Description**
 This endpoint uploads a PDF document to the server and registers its metadata.
 
 **Parameters**
@@ -149,10 +149,10 @@ This endpoint uploads a PDF document to the server and registers its metadata.
 **Path**
 `GET /api/list-documents`
 
-**Description**  
+**Description**
 This endpoint lists all uploaded PDF documents along with their metadata.
 
-**Parameters**  
+**Parameters**
 _None_
 
 **Return**
@@ -173,10 +173,10 @@ _None_
 **Specification**
  * Requires authentication
  * The response MUST return all documents of the user.
- 
+
  ## list-versions
 
-**Description**  
+**Description**
 This endpoint lists all watermarked versions of a given PDF document along with their metadata.
 
 **Path**
@@ -192,7 +192,7 @@ This endpoint lists all watermarked versions of a given PDF document along with 
 **Path**
 `GET /api/list-versions/<int:document_id>`
 
-**Parameters**  
+**Parameters**
 _None_
 
 **Return**
@@ -215,17 +215,17 @@ _None_
 
 **Specification**
  * Requires authentication
- 
- 
+
+
  ## list-all-versions
- 
+
 **Path**
 `GET /api/list-versions`
 
-**Description**  
+**Description**
 This endpoint lists all versions of all PDF documents for the authenticated user stored in the system.
 
-**Parameters**  
+**Parameters**
 _None_
 
 **Return**
@@ -246,12 +246,12 @@ _None_
 
 **Specification**
  * Requires authentication
- 
+
  ## get-document
- 
-**Description**  
+
+**Description**
 This endpoint retrieves a PDF document by fetching a specific one when an `id` is provided.
- 
+
 **Path**
 `GET /api/get-document`
 
@@ -271,12 +271,12 @@ Inline PDF file in binary format.
 
 **Specification**
  * Requires authentication
- 
+
   ## get-watermarking-methods
- 
-**Description**  
+
+**Description**
 This endpoint lists all available watermarking methods.
- 
+
 **Path**
 `GET /api/get-watermarking-methods`
 
@@ -300,12 +300,12 @@ _None_
 
 **Specification**
  * The endpoint MUST return all methods in `watermarking_utils.METHODS`.
- 
+
    ## read-watermark
- 
-**Description**  
+
+**Description**
 This endpoint reads information contain in a pdf document's watermark with the provided method.
- 
+
 **Path**
 `POST /api/read-watermark`
 
@@ -318,7 +318,7 @@ This endpoint reads information contain in a pdf document's watermark with the p
     "id": <int>
 }
 ```
- 
+
 **Path**
 `POST /api/read-watermark<int:document_id>`
 
@@ -348,10 +348,10 @@ This endpoint reads information contain in a pdf document's watermark with the p
 
 
    ## create-watermark
- 
-**Description**  
+
+**Description**
 This endpoint reads information contain in a pdf document's watermark with the provided method.
- 
+
 **Path**
 `POST /api/create-watermark`
 
@@ -366,7 +366,7 @@ This endpoint reads information contain in a pdf document's watermark with the p
     "id": <int>
 }
 ```
- 
+
 **Path**
 `POST /api/create-watermark<int:document_id>`
 
@@ -398,4 +398,4 @@ This endpoint reads information contain in a pdf document's watermark with the p
 ```
 
 **Specification**
- * Only the owner of a document should 
+ * Only the owner of a document should

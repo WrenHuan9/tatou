@@ -6,4 +6,3 @@ def test_healthz_route():
 
     assert resp.status_code == 200
     assert resp.is_json
-    
