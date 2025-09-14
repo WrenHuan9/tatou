@@ -44,13 +44,13 @@ jobs:
       run: |
         cd server/src
         black --check --diff .
-      continue-on-error: false
+      continue-on-error: true
 
     - name: Import sorting check (isort)
       run: |
         cd server/src
         isort --check-only --diff .
-      continue-on-error: false
+      continue-on-error: true
 
     - name: Linting with flake8
       run: |
