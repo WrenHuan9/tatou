@@ -70,9 +70,7 @@ def get_method(method: str | WatermarkingMethod) -> WatermarkingMethod:
     try:
         return METHODS[method]
     except KeyError as exc:
-        raise KeyError(
-            f"Unknown watermarking method: {method!r}. Known: {sorted(METHODS)}"
-        ) from exc
+        raise KeyError(f"Unknown watermarking method: {method!r}. Known: {sorted(METHODS)}") from exc
 
 
 # --------------------

@@ -248,9 +248,7 @@ def create_app():
                 {
                     "id": int(row.id),
                     "name": row.name,
-                    "creation": row.creation.isoformat()
-                    if hasattr(row.creation, "isoformat")
-                    else str(row.creation),
+                    "creation": row.creation.isoformat() if hasattr(row.creation, "isoformat") else str(row.creation),
                     "sha256": row.sha256_hex,
                     "size": int(row.size),
                 }
@@ -282,9 +280,7 @@ def create_app():
             {
                 "id": int(r.id),
                 "name": r.name,
-                "creation": r.creation.isoformat()
-                if hasattr(r.creation, "isoformat")
-                else str(r.creation),
+                "creation": r.creation.isoformat() if hasattr(r.creation, "isoformat") else str(r.creation),
                 "sha256": r.sha256_hex,
                 "size": int(r.size),
             }
@@ -418,9 +414,7 @@ def create_app():
             file_path,
             mimetype="application/pdf",
             as_attachment=False,
-            download_name=row.name
-            if row.name.lower().endswith(".pdf")
-            else f"{row.name}.pdf",
+            download_name=row.name if row.name.lower().endswith(".pdf") else f"{row.name}.pdf",
             conditional=True,  # enables 304 if If-Modified-Since/Range handling
             max_age=0,
             last_modified=file_path.stat().st_mtime,
@@ -472,9 +466,7 @@ def create_app():
             file_path,
             mimetype="application/pdf",
             as_attachment=False,
-            download_name=row.link
-            if row.link.lower().endswith(".pdf")
-            else f"{row.link}.pdf",
+            download_name=row.link if row.link.lower().endswith(".pdf") else f"{row.link}.pdf",
             conditional=True,  # enables 304 if If-Modified-Since/Range handling
             max_age=0,
             last_modified=file_path.stat().st_mtime,
@@ -801,14 +793,7 @@ def create_app():
         else:
             is_ok = has_api
         if not is_ok:
-            return (
-                jsonify(
-                    {
-                        "error": "plugin does not implement WatermarkingMethod API (add_watermark/read_secret)"
-                    }
-                ),
-                400,
-            )
+            return jsonify({"error": "plugin does not implement WatermarkingMethod API (add_watermark/read_secret)"}), 400
 
         # Register the class (not an instance) so you can instantiate as needed later
         WMUtils.METHODS[method_name] = cls()
@@ -832,9 +817,7 @@ def create_app():
         methods = []
 
         for m in WMUtils.METHODS:
-            methods.append(
-                {"name": m, "description": WMUtils.get_method(m).get_usage()}
-            )
+            methods.append({"name": m, "description": WMUtils.get_method(m).get_usage()})
 
         return jsonify({"methods": methods, "count": len(methods)}), 200
 
@@ -905,21 +888,8 @@ def create_app():
         try:
             secret = WMUtils.read_watermark(method=method, pdf=str(file_path), key=key)
         except Exception as e:
-            return (
-                jsonify({"error": f"Error when attempting to read watermark: {e}"}),
-                400,
-            )
-        return (
-            jsonify(
-                {
-                    "documentid": doc_id,
-                    "secret": secret,
-                    "method": method,
-                    "position": position,
-                }
-            ),
-            201,
-        )
+            return jsonify({"error": f"Error when attempting to read watermark: {e}"}), 400
+        return jsonify({"documentid": doc_id, "secret": secret, "method": method, "position": position}), 201
 
     return app
 

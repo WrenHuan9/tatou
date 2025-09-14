@@ -28,13 +28,9 @@ import json
 import os
 from typing import IO, Final, TypeAlias, Union
 
-from watermarking_method import (
-    InvalidKeyError,
-    SecretNotFoundError,
-    WatermarkingError,
-    WatermarkingMethod,
-    load_pdf_bytes,
-)
+from watermarking_method import InvalidKeyError, SecretNotFoundError, WatermarkingError, WatermarkingMethod, load_pdf_bytes
+
+PdfSource: TypeAlias = Union[bytes, str, os.PathLike[str], IO[bytes]]
 
 PdfSource: TypeAlias = Union[bytes, str, os.PathLike[str], IO[bytes]]
 

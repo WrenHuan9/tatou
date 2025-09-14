@@ -34,13 +34,7 @@ import sys
 from typing import Iterable, Optional
 
 from watermarking_method import InvalidKeyError, SecretNotFoundError, WatermarkingError
-from watermarking_utils import (
-    METHODS,
-    apply_watermark,
-    explore_pdf,
-    is_watermarking_applicable,
-    read_watermark,
-)
+from watermarking_utils import METHODS, apply_watermark, explore_pdf, is_watermarking_applicable, read_watermark
 
 __version__ = "0.1.0"
 
@@ -110,12 +104,8 @@ def cmd_explore(args: argparse.Namespace) -> int:
 def cmd_embed(args: argparse.Namespace) -> int:
     key = _resolve_key(args)
     secret = _resolve_secret(args)
-    if not is_watermarking_applicable(
-        method=args.method, pdf=args.input, position=args.position
-    ):
-        print(
-            f"Method {args.method} is not applicable on {args.output} at {args.position}."
-        )
+    if not is_watermarking_applicable(method=args.method, pdf=args.input, position=args.position):
+        print(f"Method {args.method} is not applicable on {args.output} at {args.position}.")
         return 5
 
     pdf_bytes = apply_watermark(
@@ -124,7 +114,7 @@ def cmd_embed(args: argparse.Namespace) -> int:
         secret=secret,
         key=key,
         position=args.position,
-    )
+    ）
     with open(args.output, "wb") as fh:
         fh.write(pdf_bytes)
     print(f"Wrote watermarked PDF -> {args.output}")
@@ -149,9 +139,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        prog="pdfwm", description="PDF watermarking utilities (embed/extract/explore)"
-    )
+    p = argparse.ArgumentParser(prog="pdfwm", description="PDF watermarking utilities (embed/extract/explore)")
     p.add_argument("--version", action="version", version=f"pdfwm {__version__}")
 
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -161,9 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_methods.set_defaults(func=cmd_methods)
 
     # explore
-    p_explore = sub.add_parser(
-        "explore", help="Explore a PDF and print a JSON tree of nodes"
-    )
+    p_explore = sub.add_parser("explore", help="Explore a PDF and print a JSON tree of nodes")
     p_explore.add_argument("input", help="Input PDF path")
     p_explore.add_argument("--out", help="Output JSON file (default: stdout)")
     p_explore.set_defaults(func=cmd_explore)
