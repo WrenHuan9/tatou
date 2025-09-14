@@ -1,0 +1,376 @@
+name: Tatou CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  code-quality:
+    name: Code Quality & Security Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install linting and security tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 pylint bandit safety black isort mypy
+        cd server && pip install -e ".[dev]"
+
+    - name: Code formatting check (Black)
+      run: |
+        cd server/src
+        black --check --diff .
+      continue-on-error: false
+
+    - name: Import sorting check (isort)
+      run: |
+        cd server/src
+        isort --check-only --diff .
+      continue-on-error: false
+
+    - name: Linting with flake8
+      run: |
+        cd server/src
+        # Strict inspection, quality gateway
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Loose inspection
+        flake8 . --count --max-complexity=10 --max-line-length=127 --statistics || true
+
+    - name: Advanced linting with pylint
+      run: |
+        cd server/src
+        pylint --rcfile=../../.pylintrc *.py || true
+      continue-on-error: true
+
+    - name: Type checking with mypy
+      run: |
+        cd server/src
+        mypy . --ignore-missing-imports || true
+      continue-on-error: true
+
+    - name: Security scanning with bandit
+      run: |
+        cd server/src
+        bandit -r . -f json -o ../../bandit-report.json || true
+        bandit -r . -f txt
+      continue-on-error: false
+
+    - name: Dependency vulnerability check
+      run: |
+        cd server
+        safety check --json --output ../../safety-report.json || true
+        safety check
+      continue-on-error: true
+
+    - name: Upload security scan results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          bandit-report.json
+          safety-report.json
+
+    - name: Advanced security scanning with Semgrep
+      uses: returntocorp/semgrep-action@v1
+      with:
+        config: >-
+          p/security-audit
+          p/secrets
+          p/python
+      env:
+        SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+      continue-on-error: true
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    needs: code-quality
+
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: test_root_password_123
+          MARIADB_DATABASE: tatou_test
+          MARIADB_USER: tatou_test
+          MARIADB_PASSWORD: test_password_123
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -h 127.0.0.1 -u root --password=test_root_password_123 --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+          --health-start-period=30s
+
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('server/pyproject.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-${{ matrix.python-version }}-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        cd server
+        pip install -e ".[dev]"
+        pip install pytest-cov pytest-xdist pytest-mock coverage[toml]
+
+    - name: Wait for MariaDB to be ready
+      run: |
+        timeout 60 bash -c 'until mysql -h 127.0.0.1 -u tatou_test -ptest_password_123 -e "SELECT 1"; do sleep 2; done'
+
+    - name: Initialize test database
+      run: |
+        mysql -h 127.0.0.1 -u root -ptest_root_password_123 tatou_test < db/tatou.sql
+
+    - name: Run unit tests
+      env:
+        SECRET_KEY: test_secret_key_for_ci_cd_pipeline_123456789
+        DB_HOST: 127.0.0.1
+        DB_PORT: 3306
+        DB_NAME: tatou_test
+        DB_USER: tatou_test
+        DB_PASSWORD: test_password_123
+        TOKEN_TTL_SECONDS: 3600
+        STORAGE_DIR: /tmp/tatou_test_storage
+        TATOU_ENV: testing
+      run: |
+        cd server
+        mkdir -p /tmp/tatou_test_storage
+
+        pytest -v \
+          --cov=src \
+          --cov-report=xml \
+          --cov-report=html \
+          --cov-report=term-missing \
+          --cov-fail-under=50 \
+          --junitxml=pytest-results.xml \
+          test/
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-py${{ matrix.python-version }}
+        path: |
+          server/pytest-results.xml
+          server/htmlcov/
+          server/coverage.xml
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./server/coverage.xml
+        flags: unittests
+        name: codecov-py${{ matrix.python-version }}
+
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: code-quality
+
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: integration_root_pass_123
+          MARIADB_DATABASE: tatou_integration
+          MARIADB_USER: tatou_integration
+          MARIADB_PASSWORD: integration_pass_123
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -h 127.0.0.1 -u root --password=integration_root_pass_123 --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        cd server
+        pip install -e ".[dev]"
+        pip install requests pytest-integration
+
+    - name: Initialize integration database
+      run: |
+        mysql -h 127.0.0.1 -u root -pintegration_root_pass_123 tatou_integration < db/tatou.sql
+
+    - name: Start application for integration testing
+      env:
+        SECRET_KEY: integration_test_secret_key_123456789
+        DB_HOST: 127.0.0.1
+        DB_PORT: 3306
+        DB_NAME: tatou_integration
+        DB_USER: tatou_integration
+        DB_PASSWORD: integration_pass_123
+        STORAGE_DIR: /tmp/tatou_integration_storage
+        PORT: 5001
+      run: |
+        cd server
+        mkdir -p /tmp/tatou_integration_storage
+        python -m gunicorn -b 0.0.0.0:5001 --timeout 30 server:app &
+        sleep 10
+
+    - name: Run integration tests
+      run: |
+        cd server
+        timeout 30 bash -c 'until curl -f http://localhost:5001/healthz; do sleep 2; done'
+
+        if [ -d "test/integration" ]; then
+          pytest -v test/integration/
+        else
+          # todo need to add full integration tests
+          curl -f http://localhost:5001/healthz
+          echo "✓ Health check passed"
+        fi
+
+  build-and-push:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    needs: [code-quality, test, integration-test]
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-tags: ${{ steps.meta.outputs.tags }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+          type=raw,value=stable,enable=${{ github.ref == 'refs/heads/main' }}
+        labels: |
+          org.opencontainers.image.title=Tatou PDF Watermarking Platform
+          org.opencontainers.image.description=A web platform for PDF watermarking
+          org.opencontainers.image.vendor=Tatou Project
+
+    - name: Build and push Docker image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: ./server
+        file: ./server/Dockerfile
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        build-args: |
+          BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+          VCS_REF=${{ github.sha }}
+          VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Generate SBOM (Software Bill of Materials)
+      uses: anchore/sbom-action@v0
+      with:
+        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        format: spdx-json
+        output-file: sbom.spdx.json
+
+    - name: Upload SBOM
+      uses: actions/upload-artifact@v3
+      with:
+        name: sbom
+        path: sbom.spdx.json
+
+  container-security-scan:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+    - name: Run Snyk to check Docker image for vulnerabilities
+      uses: snyk/actions/docker@master
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        args: --severity-threshold=high
+      continue-on-error: true

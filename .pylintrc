@@ -1,0 +1,39 @@
+# configuration
+[MASTER]
+load-plugins=
+
+init-hook='import sys; sys.path.append("server/src")'
+
+[MESSAGES CONTROL]
+disable=
+    missing-module-docstring,
+    missing-class-docstring,
+    missing-function-docstring,
+    too-few-public-methods,
+    too-many-arguments,
+    too-many-locals,
+    too-many-branches,
+    too-many-statements,
+    line-too-long,
+    import-error,
+    no-member,
+    unused-import
+
+[FORMAT]
+max-line-length=127
+string-quote=double-prefer
+
+[BASIC]
+good-names=i,j,k,ex,Run,_,id,db,app
+
+variable-rgx=[a-z_][a-z0-9_]{2,30}$
+const-rgx=(([A-Z_][A-Z0-9_]*)|(__.*__))$
+class-rgx=[A-Z_][a-zA-Z0-9]+$
+function-rgx=[a-z_][a-z0-9_]{2,30}$
+method-rgx=[a-z_][a-z0-9_]{2,30}$
+
+[DESIGN]
+max-complexity=10
+max-attributes=10
+max-args=8
+max-locals=20
