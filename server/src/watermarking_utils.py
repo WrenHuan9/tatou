@@ -28,13 +28,21 @@ To enable the richer exploration, install PyMuPDF:
 """
 from __future__ import annotations
 
+from typing import Any, Dict, Final, Iterable, List, Mapping
+import base64
 import hashlib
+import io
+import json
+import os
 import re
-from typing import Any, Dict, Final, List
 
-from add_after_eof import AddAfterEOF
-from unsafe_bash_bridge_append_eof import UnsafeBashBridgeAppendEOF
-from watermarking_method import PdfSource, WatermarkingMethod, load_pdf_bytes
+from server.src.watermarking_method import (
+    PdfSource,
+    WatermarkingMethod,
+    load_pdf_bytes,
+)
+from server.src.add_after_eof import AddAfterEOF
+from server.src.unsafe_bash_bridge_append_eof import UnsafeBashBridgeAppendEOF
 
 # --------------------
 # Method registry
@@ -42,7 +50,7 @@ from watermarking_method import PdfSource, WatermarkingMethod, load_pdf_bytes
 
 METHODS: Dict[str, WatermarkingMethod] = {
     AddAfterEOF.name: AddAfterEOF(),
-    UnsafeBashBridgeAppendEOF.name: UnsafeBashBridgeAppendEOF(),
+    UnsafeBashBridgeAppendEOF.name: UnsafeBashBridgeAppendEOF()
 }
 """Registry of available watermarking methods.
 
@@ -70,13 +78,14 @@ def get_method(method: str | WatermarkingMethod) -> WatermarkingMethod:
     try:
         return METHODS[method]
     except KeyError as exc:
-        raise KeyError(f"Unknown watermarking method: {method!r}. Known: {sorted(METHODS)}") from exc
+        raise KeyError(
+            f"Unknown watermarking method: {method!r}. Known: {sorted(METHODS)}"
+        ) from exc
 
 
 # --------------------
 # Public API helpers
 # --------------------
-
 
 def apply_watermark(
     method: str | WatermarkingMethod,
@@ -88,7 +97,6 @@ def apply_watermark(
     """Apply a watermark using the specified method and return new PDF bytes."""
     m = get_method(method)
     return m.add_watermark(pdf=pdf, secret=secret, key=key, position=position)
-
 
 def is_watermarking_applicable(
     method: str | WatermarkingMethod,
@@ -111,7 +119,9 @@ def read_watermark(method: str | WatermarkingMethod, pdf: PdfSource, key: str) -
 # --------------------
 
 # Pre-compiled regex for the fallback parser (very permissive):
-_OBJ_RE: Final[re.Pattern[bytes]] = re.compile(rb"(?m)^(\d+)\s+(\d+)\s+obj\b")
+_OBJ_RE: Final[re.Pattern[bytes]] = re.compile(
+    rb"(?m)^(\d+)\s+(\d+)\s+obj\b"
+)
 _ENDOBJ_RE: Final[re.Pattern[bytes]] = re.compile(rb"\bendobj\b")
 _TYPE_RE: Final[re.Pattern[bytes]] = re.compile(rb"/Type\s*/([A-Za-z]+)")
 
@@ -237,5 +247,6 @@ __all__ = [
     "apply_watermark",
     "read_watermark",
     "explore_pdf",
-    "is_watermarking_applicable",
+    "is_watermarking_applicable"
 ]
+

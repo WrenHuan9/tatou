@@ -27,21 +27,25 @@ Exit codes
 """
 from __future__ import annotations
 
-import argparse
-import getpass
-import json
-import sys
 from typing import Iterable, Optional
+import argparse
+import json
+import os
+import sys
+import getpass
 
-from watermarking_method import InvalidKeyError, SecretNotFoundError, WatermarkingError
-from watermarking_utils import METHODS, apply_watermark, explore_pdf, is_watermarking_applicable, read_watermark
+from server.src.watermarking_method import (
+    InvalidKeyError,
+    SecretNotFoundError,
+    WatermarkingError
+)
+from .watermarking_utils import METHODS, apply_watermark, read_watermark, explore_pdf, is_watermarking_applicable
 
 __version__ = "0.1.0"
 
 # --------------------
 # Helpers
 # --------------------
-
 
 def _read_text_from_file(path: str) -> str:
     with open(path, "r", encoding="utf-8") as fh:
@@ -83,7 +87,6 @@ def _resolve_key(args: argparse.Namespace) -> str:
 # Subcommand handlers
 # --------------------
 
-
 def cmd_methods(_args: argparse.Namespace) -> int:
     for name in sorted(METHODS):
         print(name)
@@ -104,7 +107,7 @@ def cmd_explore(args: argparse.Namespace) -> int:
 def cmd_embed(args: argparse.Namespace) -> int:
     key = _resolve_key(args)
     secret = _resolve_secret(args)
-    if not is_watermarking_applicable(method=args.method, pdf=args.input, position=args.position):
+    if not is_watermarking_applicable(method=args.method,pdf=args.input, position=args.position):
         print(f"Method {args.method} is not applicable on {args.output} at {args.position}.")
         return 5
 
@@ -113,7 +116,7 @@ def cmd_embed(args: argparse.Namespace) -> int:
         pdf=args.input,
         secret=secret,
         key=key,
-        position=args.position,
+        position=args.position
     )
     with open(args.output, "wb") as fh:
         fh.write(pdf_bytes)
@@ -137,9 +140,11 @@ def cmd_extract(args: argparse.Namespace) -> int:
 # Argument parser
 # --------------------
 
-
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="pdfwm", description="PDF watermarking utilities (embed/extract/explore)")
+    p = argparse.ArgumentParser(
+        prog="pdfwm",
+        description="PDF watermarking utilities (embed/extract/explore)"
+    )
     p.add_argument("--version", action="version", version=f"pdfwm {__version__}")
 
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -149,7 +154,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_methods.set_defaults(func=cmd_methods)
 
     # explore
-    p_explore = sub.add_parser("explore", help="Explore a PDF and print a JSON tree of nodes")
+    p_explore = sub.add_parser(
+        "explore",
+        help="Explore a PDF and print a JSON tree of nodes"
+    )
     p_explore.add_argument("input", help="Input PDF path")
     p_explore.add_argument("--out", help="Output JSON file (default: stdout)")
     p_explore.set_defaults(func=cmd_explore)
@@ -161,14 +169,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_embed.add_argument(
         "--method",
         default="toy-eof",
-        help="Watermarking method name (default: toy-eof)",
+        help="Watermarking method name (default: toy-eof)"
     )
     p_embed.add_argument("--position", help="Optional position hint", default=None)
 
     g_secret = p_embed.add_argument_group("secret input")
     g_secret.add_argument("--secret", help="Secret string to embed")
     g_secret.add_argument("--secret-file", help="Read secret from text file")
-    g_secret.add_argument("--secret-stdin", action="store_true", help="Read secret from stdin")
+    g_secret.add_argument(
+        "--secret-stdin",
+        action="store_true",
+        help="Read secret from stdin"
+    )
 
     g_key = p_embed.add_argument_group("key input")
     g_key.add_argument("--key", help="Key string")
@@ -184,7 +196,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_extract.add_argument(
         "--method",
         default="toy-eof",
-        help="Watermarking method name (default: toy-eof)",
+        help="Watermarking method name (default: toy-eof)"
     )
 
     g_key2 = p_extract.add_argument_group("key input")
@@ -203,7 +215,6 @@ def build_parser() -> argparse.ArgumentParser:
 # --------------------
 # Entrypoint
 # --------------------
-
 
 def main(argv: Optional[Iterable[str]] = None) -> int:
     parser = build_parser()
@@ -230,3 +241,4 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

@@ -28,9 +28,15 @@ import json
 import os
 from typing import IO, Final, TypeAlias, Union
 
-from watermarking_method import InvalidKeyError, SecretNotFoundError, WatermarkingError, WatermarkingMethod, load_pdf_bytes
 
-PdfSource: TypeAlias = Union[bytes, str, os.PathLike[str], IO[bytes]]
+from server.src.watermarking_method import (
+    InvalidKeyError,
+    SecretNotFoundError,
+    WatermarkingError,
+    WatermarkingMethod,
+    load_pdf_bytes,
+)
+
 
 
 class AddAfterEOF(WatermarkingMethod):
@@ -123,6 +129,10 @@ class AddAfterEOF(WatermarkingMethod):
         end_nl = data.find(b"\n", start)
         end = len(data) if end_nl == -1 else end_nl
         b64_payload = data[start:end].strip()
+        remaining_data = data[end:].strip()
+        if remaining_data:
+            raise SecretNotFoundError("Extra data found after watermark payload, indicating tampering")
+
         if not b64_payload:
             raise SecretNotFoundError("Found marker but empty payload")
 
@@ -175,3 +185,14 @@ class AddAfterEOF(WatermarkingMethod):
 
 
 __all__ = ["AddAfterEOF"]
+from server.src.watermarking_method import (
+    InvalidKeyError,
+    SecretNotFoundError,
+    WatermarkingError,
+    WatermarkingMethod,
+    load_pdf_bytes,
+)
+        remaining_data = data[end:].strip()
+        if remaining_data:
+            raise SecretNotFoundError("Extra data found after watermark payload, indicating tampering")
+

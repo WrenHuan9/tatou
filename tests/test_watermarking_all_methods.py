@@ -36,12 +36,12 @@ def sample_pdf_path(tmp_path_factory) -> Path:
 
 @pytest.fixture(scope="session")
 def secret() -> str:
-    return "unit-test-secret"
+    return "unit-tests-secret"
 
 
 @pytest.fixture(scope="session")
 def key() -> str:
-    return "unit-test-key"
+    return "unit-tests-key"
 
 
 def _as_instance(impl: object) -> object:
