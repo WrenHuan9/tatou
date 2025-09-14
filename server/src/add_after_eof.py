@@ -21,19 +21,16 @@ used. (Other watermarking methods may use PyMuPDF / ``fitz``.)
 """
 from __future__ import annotations
 
-from typing import Final
 import base64
 import hashlib
 import hmac
 import json
+import os
+from typing import IO, Final, TypeAlias, Union
 
-from watermarking_method import (
-    InvalidKeyError,
-    SecretNotFoundError,
-    WatermarkingError,
-    WatermarkingMethod,
-    load_pdf_bytes,
-)
+from watermarking_method import InvalidKeyError, SecretNotFoundError, WatermarkingError, WatermarkingMethod, load_pdf_bytes
+
+PdfSource: TypeAlias = Union[bytes, str, os.PathLike[str], IO[bytes]]
 
 
 class AddAfterEOF(WatermarkingMethod):
@@ -63,7 +60,7 @@ class AddAfterEOF(WatermarkingMethod):
     # ---------------------
     # Public API overrides
     # ---------------------
-    
+
     @staticmethod
     def get_usage() -> str:
         return "Toy method that appends a watermark record after the PDF EOF. Position is ignored."
@@ -98,14 +95,13 @@ class AddAfterEOF(WatermarkingMethod):
             out += b"\n"
         out += self._MAGIC + payload + b"\n"
         return out
-        
+
     def is_watermark_applicable(
         self,
         pdf: PdfSource,
         position: str | None = None,
     ) -> bool:
         return True
-    
 
     def read_secret(self, pdf, key: str) -> str:
         """Extract the secret if present and authenticated by ``key``.
@@ -179,4 +175,3 @@ class AddAfterEOF(WatermarkingMethod):
 
 
 __all__ = ["AddAfterEOF"]
-

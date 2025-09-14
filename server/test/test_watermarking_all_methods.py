@@ -79,4 +79,3 @@ class TestAllWatermarkingMethods:
         extracted = wm_impl.read_secret(out_pdf, key=key)
         assert isinstance(extracted, str), f"{method_name}: read_secret must return str"
         assert extracted == secret, f"{method_name}: read_secret should return the exact embedded secret"
-
