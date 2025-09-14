@@ -344,7 +344,7 @@ jobs:
     - name: Generate SBOM
       uses: aquasecurity/trivy-action@master
       with:
-        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ steps.sha.outputs.sha_short }}
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ steps.sha.outputs.sha_short }}
         scan-type: 'image'
         format: 'spdx-json'
         output: 'sbom.json'
