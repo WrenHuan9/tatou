@@ -29,7 +29,9 @@ def create_app():
 
     # --- Config ---
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
-    app.config["STORAGE_DIR"] = Path(os.environ.get("STORAGE_DIR", "./storage")).resolve()
+    app.config["STORAGE_DIR"] = Path(
+        os.environ.get("STORAGE_DIR", "./storage")
+    ).resolve()
     app.config["TOKEN_TTL_SECONDS"] = int(os.environ.get("TOKEN_TTL_SECONDS", "86400"))
 
     app.config["DB_USER"] = os.environ.get("DB_USER", "tatou")
@@ -69,12 +71,18 @@ def create_app():
                 return _auth_error("Missing or invalid Authorization header")
             token = auth.split(" ", 1)[1].strip()
             try:
-                data = _serializer().loads(token, max_age=app.config["TOKEN_TTL_SECONDS"])
+                data = _serializer().loads(
+                    token, max_age=app.config["TOKEN_TTL_SECONDS"]
+                )
             except SignatureExpired:
                 return _auth_error("Token expired")
             except BadSignature:
                 return _auth_error("Invalid token")
-            g.user = {"id": int(data["uid"]), "login": data["login"], "email": data.get("email")}
+            g.user = {
+                "id": int(data["uid"]),
+                "login": data["login"],
+                "email": data.get("email"),
+            }
             return f(*args, **kwargs)
 
         return wrapper
@@ -104,7 +112,12 @@ def create_app():
             db_ok = True
         except Exception:
             db_ok = False
-        return jsonify({"message": "The server is up and running.", "db_connected": db_ok}), 200
+        return (
+            jsonify(
+                {"message": "The server is up and running.", "db_connected": db_ok}
+            ),
+            200,
+        )
 
     # POST /api/create-user {email, login, password}
     @app.post("/api/create-user")
@@ -121,7 +134,9 @@ def create_app():
         try:
             with get_engine().begin() as conn:
                 res = conn.execute(
-                    text("INSERT INTO Users (email, hpassword, login) VALUES (:email, :hpw, :login)"),
+                    text(
+                        "INSERT INTO Users (email, hpassword, login) VALUES (:email, :hpw, :login)"
+                    ),
                     {"email": email, "hpw": hpw, "login": login},
                 )
                 uid = int(res.lastrowid)
@@ -148,7 +163,9 @@ def create_app():
         try:
             with get_engine().connect() as conn:
                 row = conn.execute(
-                    text("SELECT id, email, login, hpassword FROM Users WHERE email = :email LIMIT 1"),
+                    text(
+                        "SELECT id, email, login, hpassword FROM Users WHERE email = :email LIMIT 1"
+                    ),
                     {"email": email},
                 ).first()
         except Exception as e:
@@ -157,8 +174,19 @@ def create_app():
         if not row or not check_password_hash(row.hpassword, password):
             return jsonify({"error": "invalid credentials"}), 401
 
-        token = _serializer().dumps({"uid": int(row.id), "login": row.login, "email": row.email})
-        return jsonify({"token": token, "token_type": "bearer", "expires_in": app.config["TOKEN_TTL_SECONDS"]}), 200
+        token = _serializer().dumps(
+            {"uid": int(row.id), "login": row.login, "email": row.email}
+        )
+        return (
+            jsonify(
+                {
+                    "token": token,
+                    "token_type": "bearer",
+                    "expires_in": app.config["TOKEN_TTL_SECONDS"],
+                }
+            ),
+            200,
+        )
 
     # POST /api/upload-document  (multipart/form-data)
     @app.post("/api/upload-document")
@@ -220,7 +248,9 @@ def create_app():
                 {
                     "id": int(row.id),
                     "name": row.name,
-                    "creation": row.creation.isoformat() if hasattr(row.creation, "isoformat") else str(row.creation),
+                    "creation": row.creation.isoformat()
+                    if hasattr(row.creation, "isoformat")
+                    else str(row.creation),
                     "sha256": row.sha256_hex,
                     "size": int(row.size),
                 }
@@ -252,7 +282,9 @@ def create_app():
             {
                 "id": int(r.id),
                 "name": r.name,
-                "creation": r.creation.isoformat() if hasattr(r.creation, "isoformat") else str(r.creation),
+                "creation": r.creation.isoformat()
+                if hasattr(r.creation, "isoformat")
+                else str(r.creation),
                 "sha256": r.sha256_hex,
                 "size": int(r.size),
             }
@@ -386,7 +418,9 @@ def create_app():
             file_path,
             mimetype="application/pdf",
             as_attachment=False,
-            download_name=row.name if row.name.lower().endswith(".pdf") else f"{row.name}.pdf",
+            download_name=row.name
+            if row.name.lower().endswith(".pdf")
+            else f"{row.name}.pdf",
             conditional=True,  # enables 304 if If-Modified-Since/Range handling
             max_age=0,
             last_modified=file_path.stat().st_mtime,
@@ -438,7 +472,9 @@ def create_app():
             file_path,
             mimetype="application/pdf",
             as_attachment=False,
-            download_name=row.link if row.link.lower().endswith(".pdf") else f"{row.link}.pdf",
+            download_name=row.link
+            if row.link.lower().endswith(".pdf")
+            else f"{row.link}.pdf",
             conditional=True,  # enables 304 if If-Modified-Since/Range handling
             max_age=0,
             last_modified=file_path.stat().st_mtime,
@@ -466,7 +502,9 @@ def create_app():
         return fp
 
     # DELETE /api/delete-document  (and variants)
-    @app.route("/api/delete-document", methods=["DELETE", "POST"])  # POST supported for convenience
+    @app.route(
+        "/api/delete-document", methods=["DELETE", "POST"]
+    )  # POST supported for convenience
     @app.route("/api/delete-document/<document_id>", methods=["DELETE"])
     def delete_document(document_id: int | None = None):
         # accept id from path, query (?id= / ?documentid=), or JSON body on POST
@@ -506,7 +544,9 @@ def create_app():
                     file_deleted = True
                 except Exception as e:
                     delete_error = f"failed to delete file: {e}"
-                    app.logger.warning("Failed to delete file %s for doc id=%s: %s", fp, row.id, e)
+                    app.logger.warning(
+                        "Failed to delete file %s for doc id=%s: %s", fp, row.id, e
+                    )
             else:
                 file_missing = True
         except RuntimeError as e:
@@ -520,7 +560,9 @@ def create_app():
                 # If your schema does NOT have ON DELETE CASCADE on Version.documentid,
                 # uncomment the next line first:
                 # conn.execute(text("DELETE FROM Version WHERE documentid = :id"), {"id": doc_id})
-                conn.execute(text("DELETE FROM Documents WHERE id = :id"), {"id": doc_id})
+                conn.execute(
+                    text("DELETE FROM Documents WHERE id = :id"), {"id": doc_id}
+                )
         except Exception as e:
             return jsonify({"error": f"database error during delete: {str(e)}"}), 503
 
@@ -567,8 +609,18 @@ def create_app():
             doc_id = int(doc_id)
         except (TypeError, ValueError):
             return jsonify({"error": "document_id (int) is required"}), 400
-        if not method or not intended_for or not isinstance(secret, str) or not isinstance(key, str):
-            return jsonify({"error": "method, intended_for, secret, and key are required"}), 400
+        if (
+            not method
+            or not intended_for
+            or not isinstance(secret, str)
+            or not isinstance(key, str)
+        ):
+            return (
+                jsonify(
+                    {"error": "method, intended_for, secret, and key are required"}
+                ),
+                400,
+            )
 
         # lookup the document; enforce ownership
         try:
@@ -605,7 +657,9 @@ def create_app():
 
         # check watermark applicability
         try:
-            applicable = WMUtils.is_watermarking_applicable(method=method, pdf=str(file_path), position=position)
+            applicable = WMUtils.is_watermarking_applicable(
+                method=method, pdf=str(file_path), position=position
+            )
             if applicable is False:
                 return jsonify({"error": "watermarking method not applicable"}), 400
         except Exception as e:
@@ -614,7 +668,11 @@ def create_app():
         # apply watermark → bytes
         try:
             wm_bytes: bytes = WMUtils.apply_watermark(
-                pdf=str(file_path), secret=secret, key=key, method=method, position=position
+                pdf=str(file_path),
+                secret=secret,
+                key=key,
+                method=method,
+                position=position,
             )
             if not isinstance(wm_bytes, (bytes, bytearray)) or len(wm_bytes) == 0:
                 return jsonify({"error": "watermarking produced no output"}), 500
@@ -727,7 +785,14 @@ def create_app():
         # Determine method name for registry
         method_name = getattr(cls, "name", getattr(cls, "__name__", None))
         if not method_name or not isinstance(method_name, str):
-            return jsonify({"error": "plugin class must define a readable name (class.__name__ or .name)"}), 400
+            return (
+                jsonify(
+                    {
+                        "error": "plugin class must define a readable name (class.__name__ or .name)"
+                    }
+                ),
+                400,
+            )
 
         # Validate interface: either subclass of WatermarkingMethod or duck-typing
         has_api = all(hasattr(cls, attr) for attr in ("add_watermark", "read_secret"))
@@ -736,7 +801,14 @@ def create_app():
         else:
             is_ok = has_api
         if not is_ok:
-            return jsonify({"error": "plugin does not implement WatermarkingMethod API (add_watermark/read_secret)"}), 400
+            return (
+                jsonify(
+                    {
+                        "error": "plugin does not implement WatermarkingMethod API (add_watermark/read_secret)"
+                    }
+                ),
+                400,
+            )
 
         # Register the class (not an instance) so you can instantiate as needed later
         WMUtils.METHODS[method_name] = cls()
@@ -760,7 +832,9 @@ def create_app():
         methods = []
 
         for m in WMUtils.METHODS:
-            methods.append({"name": m, "description": WMUtils.get_method(m).get_usage()})
+            methods.append(
+                {"name": m, "description": WMUtils.get_method(m).get_usage()}
+            )
 
         return jsonify({"methods": methods, "count": len(methods)}), 200
 
@@ -831,8 +905,21 @@ def create_app():
         try:
             secret = WMUtils.read_watermark(method=method, pdf=str(file_path), key=key)
         except Exception as e:
-            return jsonify({"error": f"Error when attempting to read watermark: {e}"}), 400
-        return jsonify({"documentid": doc_id, "secret": secret, "method": method, "position": position}), 201
+            return (
+                jsonify({"error": f"Error when attempting to read watermark: {e}"}),
+                400,
+            )
+        return (
+            jsonify(
+                {
+                    "documentid": doc_id,
+                    "secret": secret,
+                    "method": method,
+                    "position": position,
+                }
+            ),
+            201,
+        )
 
     return app
 
