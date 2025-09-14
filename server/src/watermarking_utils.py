@@ -36,13 +36,13 @@ import json
 import os
 import re
 
-from watermarking_method import (
+from server.src.watermarking_method import (
     PdfSource,
     WatermarkingMethod,
     load_pdf_bytes,
 )
-from add_after_eof import AddAfterEOF
-from unsafe_bash_bridge_append_eof import UnsafeBashBridgeAppendEOF
+from server.src.add_after_eof import AddAfterEOF
+from server.src.unsafe_bash_bridge_append_eof import UnsafeBashBridgeAppendEOF
 
 # --------------------
 # Method registry

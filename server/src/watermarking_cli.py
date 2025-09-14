@@ -34,12 +34,12 @@ import os
 import sys
 import getpass
 
-from watermarking_method import (
+from server.src.watermarking_method import (
     InvalidKeyError,
     SecretNotFoundError,
     WatermarkingError
 )
-from watermarking_utils import METHODS, apply_watermark, read_watermark, explore_pdf, is_watermarking_applicable
+from .watermarking_utils import METHODS, apply_watermark, read_watermark, explore_pdf, is_watermarking_applicable
 
 __version__ = "0.1.0"
 

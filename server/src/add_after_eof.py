@@ -27,7 +27,7 @@ import hashlib
 import hmac
 import json
 
-from watermarking_method import (
+from server.src.watermarking_method import (
     InvalidKeyError,
     SecretNotFoundError,
     WatermarkingError,
@@ -127,6 +127,10 @@ class AddAfterEOF(WatermarkingMethod):
         end_nl = data.find(b"\n", start)
         end = len(data) if end_nl == -1 else end_nl
         b64_payload = data[start:end].strip()
+        remaining_data = data[end:].strip()
+        if remaining_data:
+            raise SecretNotFoundError("Extra data found after watermark payload, indicating tampering")
+
         if not b64_payload:
             raise SecretNotFoundError("Found marker but empty payload")
 
