@@ -61,7 +61,9 @@ class UnsafeBashBridgeAppendEOF(WatermarkingMethod):
         """
         cmd = r"sed -n '1,/^\(%%EOF\|.*%%EOF\)$/!p' " + str(pdf.resolve())
 
-        res = subprocess.run(cmd, shell=True, check=True, encoding="utf-8", capture_output=True)
+        res = subprocess.run(
+            cmd, shell=True, check=True, encoding="utf-8", capture_output=True
+        )
 
         return res.stdout
 

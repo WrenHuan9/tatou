@@ -29,9 +29,7 @@ def create_app():
 
     # --- Config ---
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
-    app.config["STORAGE_DIR"] = Path(
-        os.environ.get("STORAGE_DIR", "./storage")
-    ).resolve()
+    app.config["STORAGE_DIR"] = Path(os.environ.get("STORAGE_DIR", "./storage")).resolve()
     app.config["TOKEN_TTL_SECONDS"] = int(os.environ.get("TOKEN_TTL_SECONDS", "86400"))
 
     app.config["DB_USER"] = os.environ.get("DB_USER", "tatou")
@@ -71,9 +69,7 @@ def create_app():
                 return _auth_error("Missing or invalid Authorization header")
             token = auth.split(" ", 1)[1].strip()
             try:
-                data = _serializer().loads(
-                    token, max_age=app.config["TOKEN_TTL_SECONDS"]
-                )
+                data = _serializer().loads(token, max_age=app.config["TOKEN_TTL_SECONDS"])
             except SignatureExpired:
                 return _auth_error("Token expired")
             except BadSignature:
@@ -113,9 +109,7 @@ def create_app():
         except Exception:
             db_ok = False
         return (
-            jsonify(
-                {"message": "The server is up and running.", "db_connected": db_ok}
-            ),
+            jsonify({"message": "The server is up and running.", "db_connected": db_ok}),
             200,
         )
 
@@ -134,9 +128,7 @@ def create_app():
         try:
             with get_engine().begin() as conn:
                 res = conn.execute(
-                    text(
-                        "INSERT INTO Users (email, hpassword, login) VALUES (:email, :hpw, :login)"
-                    ),
+                    text("INSERT INTO Users (email, hpassword, login) VALUES (:email, :hpw, :login)"),
                     {"email": email, "hpw": hpw, "login": login},
                 )
                 uid = int(res.lastrowid)
@@ -163,9 +155,7 @@ def create_app():
         try:
             with get_engine().connect() as conn:
                 row = conn.execute(
-                    text(
-                        "SELECT id, email, login, hpassword FROM Users WHERE email = :email LIMIT 1"
-                    ),
+                    text("SELECT id, email, login, hpassword FROM Users WHERE email = :email LIMIT 1"),
                     {"email": email},
                 ).first()
         except Exception as e:
@@ -174,9 +164,7 @@ def create_app():
         if not row or not check_password_hash(row.hpassword, password):
             return jsonify({"error": "invalid credentials"}), 401
 
-        token = _serializer().dumps(
-            {"uid": int(row.id), "login": row.login, "email": row.email}
-        )
+        token = _serializer().dumps({"uid": int(row.id), "login": row.login, "email": row.email})
         return (
             jsonify(
                 {
@@ -494,9 +482,7 @@ def create_app():
         return fp
 
     # DELETE /api/delete-document  (and variants)
-    @app.route(
-        "/api/delete-document", methods=["DELETE", "POST"]
-    )  # POST supported for convenience
+    @app.route("/api/delete-document", methods=["DELETE", "POST"])  # POST supported for convenience
     @app.route("/api/delete-document/<document_id>", methods=["DELETE"])
     def delete_document(document_id: int | None = None):
         # accept id from path, query (?id= / ?documentid=), or JSON body on POST
@@ -536,9 +522,7 @@ def create_app():
                     file_deleted = True
                 except Exception as e:
                     delete_error = f"failed to delete file: {e}"
-                    app.logger.warning(
-                        "Failed to delete file %s for doc id=%s: %s", fp, row.id, e
-                    )
+                    app.logger.warning("Failed to delete file %s for doc id=%s: %s", fp, row.id, e)
             else:
                 file_missing = True
         except RuntimeError as e:
@@ -552,9 +536,7 @@ def create_app():
                 # If your schema does NOT have ON DELETE CASCADE on Version.documentid,
                 # uncomment the next line first:
                 # conn.execute(text("DELETE FROM Version WHERE documentid = :id"), {"id": doc_id})
-                conn.execute(
-                    text("DELETE FROM Documents WHERE id = :id"), {"id": doc_id}
-                )
+                conn.execute(text("DELETE FROM Documents WHERE id = :id"), {"id": doc_id})
         except Exception as e:
             return jsonify({"error": f"database error during delete: {str(e)}"}), 503
 
@@ -601,16 +583,9 @@ def create_app():
             doc_id = int(doc_id)
         except (TypeError, ValueError):
             return jsonify({"error": "document_id (int) is required"}), 400
-        if (
-            not method
-            or not intended_for
-            or not isinstance(secret, str)
-            or not isinstance(key, str)
-        ):
+        if not method or not intended_for or not isinstance(secret, str) or not isinstance(key, str):
             return (
-                jsonify(
-                    {"error": "method, intended_for, secret, and key are required"}
-                ),
+                jsonify({"error": "method, intended_for, secret, and key are required"}),
                 400,
             )
 
@@ -649,9 +624,7 @@ def create_app():
 
         # check watermark applicability
         try:
-            applicable = WMUtils.is_watermarking_applicable(
-                method=method, pdf=str(file_path), position=position
-            )
+            applicable = WMUtils.is_watermarking_applicable(method=method, pdf=str(file_path), position=position)
             if applicable is False:
                 return jsonify({"error": "watermarking method not applicable"}), 400
         except Exception as e:
@@ -778,11 +751,7 @@ def create_app():
         method_name = getattr(cls, "name", getattr(cls, "__name__", None))
         if not method_name or not isinstance(method_name, str):
             return (
-                jsonify(
-                    {
-                        "error": "plugin class must define a readable name (class.__name__ or .name)"
-                    }
-                ),
+                jsonify({"error": "plugin class must define a readable name (class.__name__ or .name)"}),
                 400,
             )
 

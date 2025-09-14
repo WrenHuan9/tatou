@@ -32,8 +32,6 @@ from watermarking_method import InvalidKeyError, SecretNotFoundError, Watermarki
 
 PdfSource: TypeAlias = Union[bytes, str, os.PathLike[str], IO[bytes]]
 
-PdfSource: TypeAlias = Union[bytes, str, os.PathLike[str], IO[bytes]]
-
 
 class AddAfterEOF(WatermarkingMethod):
     """Toy method that appends a watermark record after the PDF EOF.
@@ -137,9 +135,7 @@ class AddAfterEOF(WatermarkingMethod):
         if not (isinstance(payload, dict) and payload.get("v") == 1):
             raise SecretNotFoundError("Unsupported watermark version or format")
         if payload.get("alg") != "HMAC-SHA256":
-            raise WatermarkingError(
-                "Unsupported MAC algorithm: %r" % payload.get("alg")
-            )
+            raise WatermarkingError("Unsupported MAC algorithm: %r" % payload.get("alg"))
 
         try:
             mac_hex = str(payload["mac"])  # stored as hex string

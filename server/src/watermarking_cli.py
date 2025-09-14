@@ -114,7 +114,7 @@ def cmd_embed(args: argparse.Namespace) -> int:
         secret=secret,
         key=key,
         position=args.position,
-    ）
+    )
     with open(args.output, "wb") as fh:
         fh.write(pdf_bytes)
     print(f"Wrote watermarked PDF -> {args.output}")
@@ -168,9 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
     g_secret = p_embed.add_argument_group("secret input")
     g_secret.add_argument("--secret", help="Secret string to embed")
     g_secret.add_argument("--secret-file", help="Read secret from text file")
-    g_secret.add_argument(
-        "--secret-stdin", action="store_true", help="Read secret from stdin"
-    )
+    g_secret.add_argument("--secret-stdin", action="store_true", help="Read secret from stdin")
 
     g_key = p_embed.add_argument_group("key input")
     g_key.add_argument("--key", help="Key string")
@@ -195,9 +193,7 @@ def build_parser() -> argparse.ArgumentParser:
     g_key2.add_argument("--key-stdin", action="store_true", help="Read key from stdin")
     g_key2.add_argument("--key-prompt", action="store_true", help="Prompt for key")
 
-    p_extract.add_argument(
-        "--out", help="Write recovered secret to file (default: stdout)"
-    )
+    p_extract.add_argument("--out", help="Write recovered secret to file (default: stdout)")
 
     p_extract.set_defaults(func=cmd_extract)
 
