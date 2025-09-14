@@ -319,13 +319,14 @@ jobs:
           org.opencontainers.image.description=A web platform for PDF watermarking
           org.opencontainers.image.vendor=Tatou Project
 
+    # project only, so no need to build for arm64
     - name: Build and push Docker image
       id: build
       uses: docker/build-push-action@v5
       with:
         context: ./server
         file: ./server/Dockerfile
-        platforms: linux/amd64,linux/arm64
+        platforms: linux/amd64
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
@@ -339,7 +340,7 @@ jobs:
     - name: Generate SBOM
       uses: anchore/sbom-action@v0
       with:
-        image: ${{ fromJSON(needs.build-and-push.outputs.image-tags)[0] }}
+        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ steps.meta.outputs.version }}
         format: spdx-json
         output-file: sbom.spdx.json
 
@@ -358,7 +359,7 @@ jobs:
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@master
       with:
-        image-ref: ${{ fromJSON(needs.build-and-push.outputs.image-tags)[0] }}
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ steps.meta.outputs.version }}
         format: 'sarif'
         output: 'trivy-results.sarif'
 
@@ -373,6 +374,6 @@ jobs:
       env:
         SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
       with:
-        image: ${{ fromJSON(needs.build-and-push.outputs.image-tags)[0] }}
+        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ steps.meta.outputs.version }}
         args: --severity-threshold=high
       continue-on-error: true
