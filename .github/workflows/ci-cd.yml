@@ -87,7 +87,7 @@ jobs:
       continue-on-error: true
 
     - name: Upload security scan results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@4
       if: always()
       with:
         name: security-reports
@@ -189,7 +189,7 @@ jobs:
           test/
 
     - name: Upload test results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: test-results-py${{ matrix.python-version }}
@@ -199,7 +199,7 @@ jobs:
           server/coverage.xml
 
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v4
       with:
         file: ./server/coverage.xml
         flags: unittests
@@ -342,7 +342,7 @@ jobs:
         output-file: sbom.spdx.json
 
     - name: Upload SBOM
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: sbom
         path: sbom.spdx.json
