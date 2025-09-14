@@ -58,7 +58,7 @@ jobs:
         # Strict inspection, quality gateway
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # Loose inspection
-        flake8 . --count --max-complexity=10 --max-line-length=127 --statistics || true
+        flake8 . --count --max-complexity=10 --max-line-length=180 --statistics || true
 
     - name: Advanced linting with pylint
       run: |
@@ -200,11 +200,13 @@ jobs:
           server/coverage.xml
 
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v5
       with:
         file: ./server/coverage.xml
+        token: ${{ secrets.CODECOV_TOKEN }}
         flags: unittests
         name: codecov-py${{ matrix.python-version }}
+        verbose: true
 
   integration-test:
     name: Integration Tests
