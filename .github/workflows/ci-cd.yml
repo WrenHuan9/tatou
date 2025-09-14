@@ -310,8 +310,6 @@ jobs:
       with:
         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         tags: |
-          type=ref,event=branch
-          type=ref,event=pr
           type=sha
           type=raw,value=latest,enable={{is_default_branch}}
         labels: |
@@ -346,7 +344,7 @@ jobs:
     - name: Generate SBOM
       uses: aquasecurity/trivy-action@master
       with:
-        image-ref: ${{ fromJSON(needs.build-and-push.outputs.image-tags)[0] }}
+        image-ref: ${{ needs.build-and-push.outputs.image-tags }}
         scan-type: 'image'
         format: 'spdx-json'
         output: 'sbom.json'
@@ -362,13 +360,13 @@ jobs:
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@master
       with:
-        image-ref: ${{ fromJSON(needs.build-and-push.outputs.image-tags)[0] }}
+        image-ref: ${{ needs.build-and-push.outputs.image-tags }}
         scan-type: 'image'
         format: 'sarif'
         output: 'trivy-results.sarif'
 
     - name: Upload Trivy scan results to GitHub Security tab
-      uses: github/codeql-action/upload-sarif@v2
+      uses: github/codeql-action/upload-sarif@v3
       if: always()
       with:
         sarif_file: 'trivy-results.sarif'
@@ -378,6 +376,6 @@ jobs:
       env:
         SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
       with:
-        image: ${{ fromJSON(needs.build-and-push.outputs.image-tags)[0] }}
+        image: ${{ needs.build-and-push.outputs.image-tags }}
         args: --severity-threshold=high
       continue-on-error: true
