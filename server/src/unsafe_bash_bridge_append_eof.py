@@ -7,29 +7,24 @@ any watermarking implementation this way. Don't, unless you know how to sanitize
 """
 from __future__ import annotations
 
-from typing import Final
+import os
 import subprocess
+from typing import IO, Final, TypeAlias, Union
 
-from watermarking_method import (
-    InvalidKeyError,
-    SecretNotFoundError,
-    WatermarkingError,
-    WatermarkingMethod,
-    load_pdf_bytes,
-)
+from watermarking_method import WatermarkingMethod
+
+PdfSource: TypeAlias = Union[bytes, str, os.PathLike[str], IO[bytes]]
 
 
 class UnsafeBashBridgeAppendEOF(WatermarkingMethod):
-    """Toy method that appends a watermark record after the PDF EOF.
-
-    """
+    """Toy method that appends a watermark record after the PDF EOF."""
 
     name: Final[str] = "bash-bridge-eof"
 
     # ---------------------
     # Public API overrides
     # ---------------------
-    
+
     @staticmethod
     def get_usage() -> str:
         return "Toy method that appends a watermark record after the PDF EOF. Position and key are ignored."
@@ -46,33 +41,29 @@ class UnsafeBashBridgeAppendEOF(WatermarkingMethod):
         The ``position`` and ``key`` parameters are accepted for API compatibility but
         ignored by this method.
         """
-        data = load_pdf_bytes(pdf)
-        cmd = "cat " + str(pdf.resolve()) + " &&  printf \"" + secret + "\""
-        
+        # data = load_pdf_bytes(pdf)
+        cmd = "cat " + str(pdf.resolve()) + ' &&  printf "' + secret + '"'
+
         res = subprocess.run(cmd, shell=True, check=True, capture_output=True)
-        
+
         return res.stdout
-        
+
     def is_watermark_applicable(
         self,
         pdf: PdfSource,
         position: str | None = None,
     ) -> bool:
         return True
-    
 
     def read_secret(self, pdf, key: str) -> str:
         """Extract the secret if present.
-           Prints whatever there is after %EOF
+        Prints whatever there is after %EOF
         """
-        cmd = "sed -n '1,/^\(%%EOF\|.*%%EOF\)$/!p' " + str(pdf.resolve())
-        
+        cmd = r"sed -n '1,/^\(%%EOF\|.*%%EOF\)$/!p' " + str(pdf.resolve())
+
         res = subprocess.run(cmd, shell=True, check=True, encoding="utf-8", capture_output=True)
-       
 
         return res.stdout
 
 
-
 __all__ = ["UnsafeBashBridgeAppendEOF"]
-
