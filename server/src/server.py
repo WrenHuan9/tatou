@@ -26,6 +26,8 @@ from watermarking_method import WatermarkingMethod
 
 def create_app():
     app = Flask(__name__)
+    # --- Admins from environment variable ---
+    app.config["ADMINS"] = os.environ.get("TATOU_ADMINS", "admin").split(",")
 
     # --- Config ---
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
@@ -75,6 +77,17 @@ def create_app():
             except BadSignature:
                 return _auth_error("Invalid token")
             g.user = {"id": int(data["uid"]), "login": data["login"], "email": data.get("email")}
+            return f(*args, **kwargs)
+        return wrapper
+    
+    # 新增管理员检查装饰器
+    def require_admin(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            if not getattr(g, "user", None):
+                return jsonify({"error": "authentication required"}), 401
+            if g.user.get("login") not in app.config.get("ADMINS", []):
+                return jsonify({"error": "forbidden: admin only"}), 403
             return f(*args, **kwargs)
         return wrapper
 
@@ -377,15 +390,17 @@ def create_app():
     
     # GET /api/get-version/<link>  → returns the watermarked PDF (inline)
     @app.get("/api/get-version/<link>")
+    @require_auth  # 新增了认证装饰器
     def get_version(link: str):
         
         try:
             with get_engine().connect() as conn:
                 row = conn.execute(
                     text("""
-                        SELECT *
-                        FROM Versions
-                        WHERE link = :link
+                        SELECT v.*, d.ownerid
+                        FROM Versions v
+                        JOIN Documents d ON v.documentid = d.id
+                        WHERE v.link = :link
                         LIMIT 1
                     """),
                     {"link": link},
@@ -397,6 +412,10 @@ def create_app():
         if not row:
             return jsonify({"error": "document not found"}), 404
 
+        # 检查是否为拥有者或管理员
+        if g.user["id"] != row.ownerid and g.user["login"] not in app.config.get("ADMINS", []):
+            return jsonify({"error": "forbidden"}), 403
+        
         file_path = Path(row.path)
 
         # Basic safety: ensure path is inside STORAGE_DIR and exists
@@ -444,6 +463,7 @@ def create_app():
     # DELETE /api/delete-document  (and variants)
     @app.route("/api/delete-document", methods=["DELETE", "POST"])  # POST supported for convenience
     @app.route("/api/delete-document/<document_id>", methods=["DELETE"])
+    @require_auth  # 确保只有认证用户才能访问此路由
     def delete_document(document_id: int | None = None):
         # accept id from path, query (?id= / ?documentid=), or JSON body on POST
         if not document_id:
@@ -453,18 +473,19 @@ def create_app():
                 or (request.is_json and (request.get_json(silent=True) or {}).get("id"))
             )
         try:
-            doc_id = document_id
+            doc_id = int(document_id)
         except (TypeError, ValueError):
             return jsonify({"error": "document id required"}), 400
 
         # Fetch the document (enforce ownership)
         try:
             with get_engine().connect() as conn:
-        # 使用参数化查询来修复漏洞，将 doc_id 作为单独的参数传递
-                query = "SELECT * FROM Documents WHERE id = :id"
+                # 使用参数化查询来修复漏洞，将doc_id作为单独的参数传递
+                query = "SELECT * FROM Documents WHERE id = :id AND ownerid = :uid"
+                # 将WHERE id = :id改为同时验证文档 ID 和用户 ID。
                 row = conn.execute(
                     text(query),
-                    {"id": doc_id}
+                    {"id": doc_id, "uid": int(g.user["id"])},
                 ).first()
         except Exception as e:
             return jsonify({"error": f"database error: {str(e)}"}), 503
@@ -553,10 +574,11 @@ def create_app():
                     text("""
                         SELECT id, name, path
                         FROM Documents
-                        WHERE id = :id
+                        WHERE id = :id AND ownerid = :uid
                         LIMIT 1
                     """),
-                    {"id": doc_id},
+                    {"id": doc_id, "uid": int(g.user["id"])},
+                    # 同时验证文档所有权
                 ).first()
         except Exception as e:
             return jsonify({"error": f"database error: {str(e)}"}), 503
@@ -662,6 +684,7 @@ def create_app():
         
     @app.post("/api/load-plugin")
     @require_auth
+    @require_admin
     def load_plugin():
         """
         Load a serialized Python class implementing WatermarkingMethod from
@@ -775,9 +798,10 @@ def create_app():
                     text("""
                         SELECT id, name, path
                         FROM Documents
-                        WHERE id = :id
+                        WHERE id = :id AND ownerid = :uid
+                        #修改过
                     """),
-                    {"id": doc_id},
+                    {"id": doc_id, "uid": int(g.user["id"])},
                 ).first()
         except Exception as e:
             return jsonify({"error": f"database error: {str(e)}"}), 503
