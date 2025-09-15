@@ -6,7 +6,7 @@ any watermarking implementation this way. Don't, unless you know how to sanitize
 
 """
 from __future__ import annotations
-
+import os
 from typing import Final
 import subprocess
 
@@ -18,6 +18,10 @@ from server.src.watermarking_method import (
     load_pdf_bytes,
 )
 
+from typing import IO, Final, TypeAlias, Union
+
+
+PdfSource: TypeAlias = Union[bytes, str, os.PathLike[str], IO[bytes]]
 
 class UnsafeBashBridgeAppendEOF(WatermarkingMethod):
     """Toy method that appends a watermark record after the PDF EOF.

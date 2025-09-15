@@ -45,7 +45,9 @@ from dataclasses import dataclass
 from typing import IO, ClassVar, TypeAlias, Union
 import io
 import os
+from typing import IO, Final, TypeAlias, Union
 
+PdfSource: TypeAlias = Union[bytes, str, os.PathLike[str], IO[bytes]]
 # ----------------------------
 # Public type aliases & errors
 # ----------------------------

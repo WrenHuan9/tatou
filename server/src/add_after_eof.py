@@ -26,6 +26,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 
 from server.src.watermarking_method import (
     InvalidKeyError,
@@ -35,6 +36,10 @@ from server.src.watermarking_method import (
     load_pdf_bytes,
 )
 
+from typing import IO, Final, TypeAlias, Union
+
+
+PdfSource: TypeAlias = Union[bytes, str, os.PathLike[str], IO[bytes]]
 
 class AddAfterEOF(WatermarkingMethod):
     """Toy method that appends a watermark record after the PDF EOF.
