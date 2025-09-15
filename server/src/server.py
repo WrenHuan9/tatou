@@ -460,8 +460,12 @@ def create_app():
         # Fetch the document (enforce ownership)
         try:
             with get_engine().connect() as conn:
-                query = "SELECT * FROM Documents WHERE id = " + doc_id
-                row = conn.execute(text(query)).first()
+        # 使用参数化查询来修复漏洞，将 doc_id 作为单独的参数传递
+                query = "SELECT * FROM Documents WHERE id = :id"
+                row = conn.execute(
+                    text(query),
+                    {"id": doc_id}
+                ).first()
         except Exception as e:
             return jsonify({"error": f"database error: {str(e)}"}), 503
 
