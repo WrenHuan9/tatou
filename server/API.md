@@ -27,6 +27,8 @@
   - **POST** `/api/read-watermark/<int:document_id>`
   - **POST** `/api/read-watermark`
 - [upload-document](#upload-document) — **POST** `/api/upload-document`
+- [rmap-initiate](#rmap-initiate) — **POST** `/api/rmap-initiate`
+- [rmap-get-link](#rmap-get-link) — **POST** `/api/rmap-get-link`
 
 
 
@@ -398,4 +400,94 @@ This endpoint reads information contain in a pdf document's watermark with the p
 ```
 
 **Specification**
- * Only the owner of a document should 
+ * Only the owner of a document should be able to create watermarked versions of their documents
+ * The document owner MUST be able to list all versions of their documents and their intended recipients
+
+ ## rmap-initiate
+ 
+**Description**  
+This endpoint receives GPG encrypted messages conforming to RMAP message 1.
+ 
+**Path**
+`POST /api/rmap-initiate`
+
+
+**Parameters**
+```json
+{
+    "payload": <ASCII_armored_base64>
+}
+```
+
+should decrypt to:
+
+```json
+{
+    "nonceClient": <u64>,
+    "identity": <string>
+}
+```
+
+
+
+**Return**
+```json
+{
+    "payload": <ASCII_armored_base64>
+}
+```
+should decrypt to:
+
+```json
+{
+    "nonceClient": <u64>,
+    "nonceServer": <u64>
+}
+```
+
+**Specification**
+ * The server SHOULD only respond to known identities.
+ * All submitted group public keys MUST constitute valid identities.
+ 
+  ## rmap-get-link
+ 
+**Description**  
+This endpoint receives GPG encrypted messages conforming to RMAP message 2.
+ 
+**Path**
+`POST /api/rmap-get-link`
+
+
+**Parameters**
+```json
+{
+    "payload": <ASCII_armored_base64>
+}
+```
+
+should decrypt to:
+
+```json
+{
+    "nonceServer": <u64>
+}
+```
+
+
+
+**Return**
+```json
+{
+    "payload": <ASCII_armored_base64>
+}
+```
+should decrypt to:
+
+```json
+{
+    "result":"<32-hex NonceClient||NonceServer>"
+}
+```
+
+**Specification**
+ * `get-version/<result>` SHOULD point to a watermarked version of a PDF specific to the group authenticated by the public key of the client.
