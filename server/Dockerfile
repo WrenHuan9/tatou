@@ -27,7 +27,7 @@ COPY src /app/src
 COPY flag /app/flag
 RUN pip install --no-cache-dir -e .
 
-# 可选的健康检查
+# todo: temporarily health check for phase 1
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:5000/healthz || exit 1
 

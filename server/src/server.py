@@ -74,7 +74,11 @@ def create_app():
                 return _auth_error("Token expired")
             except BadSignature:
                 return _auth_error("Invalid token")
-            g.user = {"id": int(data["uid"]), "login": data["login"], "email": data.get("email")}
+            g.user = {
+                "id": int(data["uid"]),
+                "login": data["login"],
+                "email": data.get("email"),
+            }
             return f(*args, **kwargs)
 
         return wrapper
@@ -104,7 +108,10 @@ def create_app():
             db_ok = True
         except Exception:
             db_ok = False
-        return jsonify({"message": "The server is up and running.", "db_connected": db_ok}), 200
+        return (
+            jsonify({"message": "The server is up and running.", "db_connected": db_ok}),
+            200,
+        )
 
     # POST /api/create-user {email, login, password}
     @app.post("/api/create-user")
@@ -158,7 +165,16 @@ def create_app():
             return jsonify({"error": "invalid credentials"}), 401
 
         token = _serializer().dumps({"uid": int(row.id), "login": row.login, "email": row.email})
-        return jsonify({"token": token, "token_type": "bearer", "expires_in": app.config["TOKEN_TTL_SECONDS"]}), 200
+        return (
+            jsonify(
+                {
+                    "token": token,
+                    "token_type": "bearer",
+                    "expires_in": app.config["TOKEN_TTL_SECONDS"],
+                }
+            ),
+            200,
+        )
 
     # POST /api/upload-document  (multipart/form-data)
     @app.post("/api/upload-document")
@@ -568,7 +584,10 @@ def create_app():
         except (TypeError, ValueError):
             return jsonify({"error": "document_id (int) is required"}), 400
         if not method or not intended_for or not isinstance(secret, str) or not isinstance(key, str):
-            return jsonify({"error": "method, intended_for, secret, and key are required"}), 400
+            return (
+                jsonify({"error": "method, intended_for, secret, and key are required"}),
+                400,
+            )
 
         # lookup the document; enforce ownership
         try:
@@ -614,7 +633,11 @@ def create_app():
         # apply watermark → bytes
         try:
             wm_bytes: bytes = WMUtils.apply_watermark(
-                pdf=str(file_path), secret=secret, key=key, method=method, position=position
+                pdf=str(file_path),
+                secret=secret,
+                key=key,
+                method=method,
+                position=position,
             )
             if not isinstance(wm_bytes, (bytes, bytearray)) or len(wm_bytes) == 0:
                 return jsonify({"error": "watermarking produced no output"}), 500
@@ -727,7 +750,10 @@ def create_app():
         # Determine method name for registry
         method_name = getattr(cls, "name", getattr(cls, "__name__", None))
         if not method_name or not isinstance(method_name, str):
-            return jsonify({"error": "plugin class must define a readable name (class.__name__ or .name)"}), 400
+            return (
+                jsonify({"error": "plugin class must define a readable name (class.__name__ or .name)"}),
+                400,
+            )
 
         # Validate interface: either subclass of WatermarkingMethod or duck-typing
         has_api = all(hasattr(cls, attr) for attr in ("add_watermark", "read_secret"))

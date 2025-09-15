@@ -108,7 +108,13 @@ def cmd_embed(args: argparse.Namespace) -> int:
         print(f"Method {args.method} is not applicable on {args.output} at {args.position}.")
         return 5
 
-    pdf_bytes = apply_watermark(method=args.method, pdf=args.input, secret=secret, key=key, position=args.position)
+    pdf_bytes = apply_watermark(
+        method=args.method,
+        pdf=args.input,
+        secret=secret,
+        key=key,
+        position=args.position,
+    )
     with open(args.output, "wb") as fh:
         fh.write(pdf_bytes)
     print(f"Wrote watermarked PDF -> {args.output}")
@@ -152,7 +158,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_embed = sub.add_parser("embed", help="Embed a secret into a PDF")
     p_embed.add_argument("input", help="Input PDF path")
     p_embed.add_argument("output", help="Output (watermarked) PDF path")
-    p_embed.add_argument("--method", default="toy-eof", help="Watermarking method name (default: toy-eof)")
+    p_embed.add_argument(
+        "--method",
+        default="toy-eof",
+        help="Watermarking method name (default: toy-eof)",
+    )
     p_embed.add_argument("--position", help="Optional position hint", default=None)
 
     g_secret = p_embed.add_argument_group("secret input")
@@ -171,7 +181,11 @@ def build_parser() -> argparse.ArgumentParser:
     # extract
     p_extract = sub.add_parser("extract", help="Extract a secret from a PDF")
     p_extract.add_argument("input", help="Input PDF path (possibly watermarked)")
-    p_extract.add_argument("--method", default="toy-eof", help="Watermarking method name (default: toy-eof)")
+    p_extract.add_argument(
+        "--method",
+        default="toy-eof",
+        help="Watermarking method name (default: toy-eof)",
+    )
 
     g_key2 = p_extract.add_argument_group("key input")
     g_key2.add_argument("--key", help="Key string")
