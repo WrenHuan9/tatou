@@ -1,12 +1,9 @@
-import datetime as dt
-import hashlib
 import os
-import pickle as _std_pickle
-from functools import wraps
+from dotenv import load_dotenv
+import io
+import hashlib
+import datetime as dt
 from pathlib import Path
-
-from flask import Flask, g, jsonify, request, send_file
-from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from functools import wraps
 import inspect
 
@@ -560,10 +557,11 @@ def create_app(test_config=None):
                 return jsonify({"error": f"Error when attempting to read watermark: {e}"}), 400
             return jsonify({"documentid": doc_id, "secret": secret, "method": method, "position": position}), 201
 
+    # 在函数的最后返回 app
     return app
 
 
-# WSGI entrypoint
+# --- WSGI 入口点（保持不变） ---
 app = create_app()
 
 if __name__ == "__main__":
