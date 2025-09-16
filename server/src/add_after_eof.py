@@ -148,9 +148,15 @@ class AddAfterEOF(WatermarkingMethod):
         except Exception as exc:
             raise SecretNotFoundError("Invalid payload fields") from exc
 
+        expected = self._mac_hex(secret_bytes, key)
+        if not hmac.compare_digest(mac_hex, expected):
+            raise InvalidKeyError("Provided key failed to authenticate the watermark")
+
         return secret_bytes.decode("utf-8")
 
-
+        # ---------------------
+        # Internal helpers
+        # ---------------------
 
     def _build_payload(self, secret: str, key: str) -> bytes:
         """Build the base64url-encoded JSON payload to append."""
