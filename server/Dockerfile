@@ -16,6 +16,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates openssh-client \
+ && rm -rf /var/lib/apt/lists/*
+
 # Copy project description, to install dependencies
 COPY pyproject.toml /app/pyproject.toml
 
@@ -25,6 +29,7 @@ RUN pip install --no-cache-dir -e .
 # Copy sources after dependencies installation
 COPY src /app/src
 COPY flag /app/flag
+COPY entrypoint.sh /app/entrypoint.sh
 RUN pip install --no-cache-dir -e .
 
 # todo: temporarily health check for phase 1
@@ -34,4 +39,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 EXPOSE 5000
 
 # Default command runs the web server
-CMD ["gunicorn", "-b", "0.0.0.0:5000", "server:app"]
+CMD ["./entrypoint.sh"]
+
