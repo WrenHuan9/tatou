@@ -85,17 +85,6 @@ def create_app():
             return f(*args, **kwargs)
 
         return wrapper
-    
-    # 新增管理员检查装饰器
-    def require_admin(f):
-        @wraps(f)
-        def wrapper(*args, **kwargs):
-            if not getattr(g, "user", None):
-                return jsonify({"error": "authentication required"}), 401
-            if g.user.get("login") not in app.config.get("ADMINS", []):
-                return jsonify({"error": "forbidden: admin only"}), 403
-            return f(*args, **kwargs)
-        return wrapper
 
     def _sha256_file(path: Path) -> str:
         h = hashlib.sha256()
@@ -408,8 +397,6 @@ def create_app():
             file_path = _safe_resolve_under_storage(row.path, storage_root)
         except Exception as e:
             # Path looks suspicious or outside storage
-            # 路径逃逸，记录错误并返回
-            app.logger.error("Path safety check failed for doc id=%s: %s", document_id, e)
             return jsonify({"error": "document path invalid"}), 500
 
         if not file_path.exists():
@@ -457,7 +444,7 @@ def create_app():
             return jsonify({"error": "document not found"}), 404
 
         # 检查是否为拥有者或管理员
-        if g.user["id"] != row.ownerid and g.user["login"] not in app.config.get("ADMINS", []):
+        if g.user["id"] != row.ownerid:
             return jsonify({"error": "forbidden"}), 403
         
         file_path = Path(row.path)
@@ -468,8 +455,6 @@ def create_app():
             file_path = _safe_resolve_under_storage(row.path, Path(app.config["STORAGE_DIR"]))
         except Exception:
             # Path looks suspicious or outside storage
-            # 路径逃逸，记录错误并返回
-            app.logger.error("Path safety check failed for version link=%s: %s", link, e)
             return jsonify({"error": "document path invalid"}), 500
 
         if not file_path.exists():
@@ -560,7 +545,6 @@ def create_app():
         except RuntimeError as e:
             # Path escapes storage root; refuse to touch the file
             delete_error = str(e)
-            app.logger.error("Path safety check failed for doc id=%s: %s", row.id, e)
 
         # Delete DB row (will cascade to Version if FK has ON DELETE CASCADE)
         try:
@@ -652,7 +636,6 @@ def create_app():
         except RuntimeError:
             return jsonify({"error": "document path invalid"}), 500
         if not file_path.exists():
-            app.logger.error("Path safety check failed for doc id=%s: %s", doc_id, e)
             return jsonify({"error": "file missing on disk"}), 410
 
         # check watermark applicability
@@ -742,7 +725,6 @@ def create_app():
 
     @app.post("/api/load-plugin")
     @require_auth
-    @require_admin
     def load_plugin():
         """
         Load a serialized Python class implementing WatermarkingMethod from
@@ -885,7 +867,6 @@ def create_app():
         except RuntimeError:
             return jsonify({"error": "document path invalid"}), 500
         if not file_path.exists():
-            app.logger.error("Path safety check failed for doc id=%s: %s", doc_id, e)
             return jsonify({"error": "file missing on disk"}), 410
 
         secret = None
