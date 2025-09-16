@@ -138,12 +138,11 @@ class AddAfterEOF(WatermarkingMethod):
             raise WatermarkingError("Unsupported MAC algorithm: %r" % payload.get("alg"))
 
         try:
-            # 在尝试转换前，先检查类型是否为字符串
             if not isinstance(payload.get("mac"), str) or not isinstance(payload.get("secret"), str):
                 raise SecretNotFoundError("Invalid payload fields")
 
-            mac_hex = payload["mac"]# stored as hex string
-            secret_b64 = payload["secret"].encode("ascii")
+            mac_hex = str(payload["mac"])  # stored as hex string
+            secret_b64 = str(payload["secret"]).encode("ascii")
             secret_bytes = base64.b64decode(secret_b64)
 
         except Exception as exc:
