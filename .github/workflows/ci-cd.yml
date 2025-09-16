@@ -262,8 +262,8 @@ jobs:
       run: |
         cd server
         mkdir -p /tmp/tatou_integration_storage
-        python -m gunicorn -b 0.0.0.0:5001 --timeout 30 server:app &
-        sleep 10
+        python -m gunicorn -b 0.0.0.0:5001 --timeout 30 server.src.server:app &
+        sleep 5
 
     - name: Run integration tests
       run: |
