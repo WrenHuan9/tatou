@@ -428,7 +428,7 @@ def create_app():
                         """
                         SELECT *
                         FROM Versions
-                        WHERE v.link = :link
+                        WHERE link = :link
                         LIMIT 1
                     """
                     ),
