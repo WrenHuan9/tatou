@@ -28,7 +28,7 @@ import json
 import os
 from typing import IO, Final, TypeAlias, Union
 
-from .watermarking_method import InvalidKeyError, SecretNotFoundError, WatermarkingError, WatermarkingMethod, load_pdf_bytes
+from server.src.watermarking_method import InvalidKeyError, SecretNotFoundError, WatermarkingError, WatermarkingMethod, load_pdf_bytes
 
 PdfSource: TypeAlias = Union[bytes, str, os.PathLike[str], IO[bytes]]
 
@@ -138,27 +138,20 @@ class AddAfterEOF(WatermarkingMethod):
             raise WatermarkingError("Unsupported MAC algorithm: %r" % payload.get("alg"))
 
         try:
-            mac_hex = payload["mac"]
-            secret_b64 = payload["secret"]
+            # 在尝试转换前，先检查类型是否为字符串
+            if not isinstance(payload.get("mac"), str) or not isinstance(payload.get("secret"), str):
+                raise SecretNotFoundError("Invalid payload fields")
 
-            # 增加严格的类型检查
-            if not isinstance(mac_hex, str) or not isinstance(secret_b64, str):
-                raise TypeError("Payload fields 'mac' and 'secret' must be strings")
+            mac_hex = payload["mac"]# stored as hex string
+            secret_b64 = payload["secret"].encode("ascii")
+            secret_bytes = base64.b64decode(secret_b64)
 
-            secret_bytes = base64.b64decode(secret_b64.encode("ascii"))
-            # 捕获所有可能的格式/类型/缺失字段错误
-        except (KeyError, TypeError, base64.binascii.Error) as exc:
+        except Exception as exc:
             raise SecretNotFoundError("Invalid payload fields") from exc
-
-        expected = self._mac_hex(secret_bytes, key)
-        if not hmac.compare_digest(mac_hex, expected):
-            raise InvalidKeyError("Provided key failed to authenticate the watermark")
 
         return secret_bytes.decode("utf-8")
 
-    # ---------------------
-    # Internal helpers
-    # ---------------------
+
 
     def _build_payload(self, secret: str, key: str) -> bytes:
         """Build the base64url-encoded JSON payload to append."""

@@ -1,18 +1,16 @@
 # Server image: minimal Flask + Gunicorn
 FROM python:3.12-slim
 
-# 构建参数 (用于CI/CD，不影响功能)
+
 ARG BUILD_DATE
 ARG VCS_REF
 ARG VERSION
 
-# 轻量元数据标签
 LABEL org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}"
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
 
 WORKDIR /app
 
@@ -27,7 +25,7 @@ COPY pyproject.toml /app/pyproject.toml
 RUN pip install --no-cache-dir -e .
 
 # Copy sources after dependencies installation
-COPY src /app/src
+COPY src /app/server/src
 COPY flag /app/flag
 COPY entrypoint.sh /app/entrypoint.sh
 RUN pip install --no-cache-dir -e .
