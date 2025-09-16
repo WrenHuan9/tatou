@@ -419,7 +419,6 @@ def create_app():
 
     # GET /api/get-version/<link>  → returns the watermarked PDF (inline)
     @app.get("/api/get-version/<link>")
-    @require_auth  # 新增了认证装饰器
     def get_version(link: str):
         try:
             with get_engine().connect() as conn:
