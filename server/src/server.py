@@ -27,8 +27,6 @@ from watermarking_method import WatermarkingMethod
 
 def create_app():
     app = Flask(__name__)
-    # --- Admins from environment variable ---
-    app.config["ADMINS"] = os.environ.get("TATOU_ADMINS", "admin").split(",")
 
     # --- Config ---
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
@@ -426,10 +424,10 @@ def create_app():
         try:
             with get_engine().connect() as conn:
                 row = conn.execute(
-                    text("""
-                        SELECT v.*, d.ownerid
-                        FROM Versions v
-                        JOIN Documents d ON v.documentid = d.id
+                    text(
+                        """
+                        SELECT *
+                        FROM Versions
                         WHERE v.link = :link
                         LIMIT 1
                     """
