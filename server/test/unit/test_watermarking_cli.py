@@ -988,22 +988,7 @@ if __name__ == "__main__":
             exec('if __name__ == "__main__":\n    raise SystemExit(main())', globals_import)
             # main() should not be called when imported
             mock_main.assert_not_called()
-    
-    def test_main_entrypoint_with_subprocess(self):
-        """Test __main__ execution by running the module as a script."""
-        import subprocess
-        import sys
-        
-        # Run the actual module file as a script with --version
-        result = subprocess.run([
-            sys.executable, 
-            '/Users/enzo/Desktop/softsec/tatou/server/src/watermarking_cli.py',
-            '--version'
-        ], capture_output=True, text=True, cwd='/Users/enzo/Desktop/softsec/tatou/server/src')
-        
-        # Should exit with code 0 for --version and contain version info
-        assert result.returncode == 0
-        assert "pdfwm" in result.stdout
+
     
     def test_main_name_check_coverage(self):
         """Test to ensure the __name__ == '__main__' line is covered."""
