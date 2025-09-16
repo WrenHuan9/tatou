@@ -28,7 +28,7 @@ import json
 import os
 from typing import IO, Final, TypeAlias, Union
 
-from watermarking_method import InvalidKeyError, SecretNotFoundError, WatermarkingError, WatermarkingMethod, load_pdf_bytes
+from .watermarking_method import InvalidKeyError, SecretNotFoundError, WatermarkingError, WatermarkingMethod, load_pdf_bytes
 
 PdfSource: TypeAlias = Union[bytes, str, os.PathLike[str], IO[bytes]]
 
@@ -138,10 +138,16 @@ class AddAfterEOF(WatermarkingMethod):
             raise WatermarkingError("Unsupported MAC algorithm: %r" % payload.get("alg"))
 
         try:
-            mac_hex = str(payload["mac"])  # stored as hex string
-            secret_b64 = str(payload["secret"]).encode("ascii")
-            secret_bytes = base64.b64decode(secret_b64)
-        except Exception as exc:
+            mac_hex = payload["mac"]
+            secret_b64 = payload["secret"]
+
+            # 增加严格的类型检查
+            if not isinstance(mac_hex, str) or not isinstance(secret_b64, str):
+                raise TypeError("Payload fields 'mac' and 'secret' must be strings")
+
+            secret_bytes = base64.b64decode(secret_b64.encode("ascii"))
+            # 捕获所有可能的格式/类型/缺失字段错误
+        except (KeyError, TypeError, base64.binascii.Error) as exc:
             raise SecretNotFoundError("Invalid payload fields") from exc
 
         expected = self._mac_hex(secret_bytes, key)
