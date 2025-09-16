@@ -4,6 +4,7 @@ import os
 import pickle as _std_pickle
 from functools import wraps
 from pathlib import Path
+from typing import cast # 添加
 
 from flask import Flask, g, jsonify, request, send_file
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
@@ -389,8 +390,10 @@ def create_app():
 
         # Basic safety: ensure path is inside STORAGE_DIR and exists
         try:
-            file_path.resolve().relative_to(app.config["STORAGE_DIR"].resolve())
-        except Exception:
+            # 使用统一的安全函数来解析路径
+            storage_root = Path(cast(str, app.config["STORAGE_DIR"]))
+            file_path = _safe_resolve_under_storage(row.path, storage_root)
+        except Exception as e:
             # Path looks suspicious or outside storage
             return jsonify({"error": "document path invalid"}), 500
 
@@ -437,11 +440,16 @@ def create_app():
         if not row:
             return jsonify({"error": "document not found"}), 404
 
+        # 检查是否为拥有者或管理员
+        if g.user["id"] != row.ownerid:
+            return jsonify({"error": "forbidden"}), 403
+        
         file_path = Path(row.path)
 
         # Basic safety: ensure path is inside STORAGE_DIR and exists
         try:
-            file_path.resolve().relative_to(app.config["STORAGE_DIR"].resolve())
+            # 使用已有的安全函数来解析路径
+            file_path = _safe_resolve_under_storage(row.path, Path(app.config["STORAGE_DIR"]))
         except Exception:
             # Path looks suspicious or outside storage
             return jsonify({"error": "document path invalid"}), 500
@@ -484,6 +492,7 @@ def create_app():
     # DELETE /api/delete-document  (and variants)
     @app.route("/api/delete-document", methods=["DELETE", "POST"])  # POST supported for convenience
     @app.route("/api/delete-document/<document_id>", methods=["DELETE"])
+    @require_auth  # 确保只有认证用户才能访问此路由
     def delete_document(document_id: int | None = None):
         # accept id from path, query (?id= / ?documentid=), or JSON body on POST
         if not document_id:
@@ -493,15 +502,20 @@ def create_app():
                 or (request.is_json and (request.get_json(silent=True) or {}).get("id"))
             )
         try:
-            doc_id = document_id
+            doc_id = int(document_id)
         except (TypeError, ValueError):
             return jsonify({"error": "document id required"}), 400
 
         # Fetch the document (enforce ownership)
         try:
             with get_engine().connect() as conn:
-                query = "SELECT * FROM Documents WHERE id = " + doc_id
-                row = conn.execute(text(query)).first()
+                # 使用参数化查询来修复漏洞，将doc_id作为单独的参数传递
+                query = "SELECT * FROM Documents WHERE id = :id AND ownerid = :uid"
+                # 将WHERE id = :id改为同时验证文档 ID 和用户 ID。
+                row = conn.execute(
+                    text(query),
+                    {"id": doc_id, "uid": int(g.user["id"])},
+                ).first()
         except Exception as e:
             return jsonify({"error": f"database error: {str(e)}"}), 503
 
@@ -510,7 +524,7 @@ def create_app():
             return jsonify({"error": "document not found"}), 404
 
         # Resolve and delete file (best effort)
-        storage_root = Path(app.config["STORAGE_DIR"])
+        storage_root = Path(cast(str, app.config["STORAGE_DIR"])) # 修改
         file_deleted = False
         file_missing = False
         delete_error = None
@@ -528,7 +542,6 @@ def create_app():
         except RuntimeError as e:
             # Path escapes storage root; refuse to touch the file
             delete_error = str(e)
-            app.logger.error("Path safety check failed for doc id=%s: %s", row.id, e)
 
         # Delete DB row (will cascade to Version if FK has ON DELETE CASCADE)
         try:
@@ -597,11 +610,10 @@ def create_app():
                         """
                         SELECT id, name, path
                         FROM Documents
-                        WHERE id = :id
+                        WHERE id = :id AND ownerid = :uid
                         LIMIT 1
-                    """
-                    ),
-                    {"id": doc_id},
+                    """),
+                    {"id": doc_id, "uid": int(g.user["id"])},
                 ).first()
         except Exception as e:
             return jsonify({"error": f"database error: {str(e)}"}), 503
@@ -610,14 +622,15 @@ def create_app():
             return jsonify({"error": "document not found"}), 404
 
         # resolve path safely under STORAGE_DIR
-        storage_root = Path(app.config["STORAGE_DIR"]).resolve()
+        storage_root = Path(cast(str, app.config["STORAGE_DIR"])).resolve()
         file_path = Path(row.path)
         if not file_path.is_absolute():
             file_path = storage_root / file_path
         file_path = file_path.resolve()
         try:
-            file_path.relative_to(storage_root)
-        except ValueError:
+            # 使用统一的安全函数来解析路径
+            file_path = _safe_resolve_under_storage(row.path, storage_root)
+        except RuntimeError:
             return jsonify({"error": "document path invalid"}), 500
         if not file_path.exists():
             return jsonify({"error": "file missing on disk"}), 410
@@ -723,7 +736,7 @@ def create_app():
             return jsonify({"error": "filename is required"}), 400
 
         # Locate the plugin in /storage/files/plugins (relative to STORAGE_DIR)
-        storage_root = Path(app.config["STORAGE_DIR"])
+        storage_root = Path(cast(str, app.config["STORAGE_DIR"]))
         plugins_dir = storage_root / "files" / "plugins"
         try:
             plugins_dir.mkdir(parents=True, exist_ok=True)
@@ -829,10 +842,9 @@ def create_app():
                         """
                         SELECT id, name, path
                         FROM Documents
-                        WHERE id = :id
-                    """
-                    ),
-                    {"id": doc_id},
+                        WHERE id = :id AND ownerid = :uid
+                    """),
+                    {"id": doc_id, "uid": int(g.user["id"])},
                 ).first()
         except Exception as e:
             return jsonify({"error": f"database error: {str(e)}"}), 503
@@ -841,14 +853,15 @@ def create_app():
             return jsonify({"error": "document not found"}), 404
 
         # resolve path safely under STORAGE_DIR
-        storage_root = Path(app.config["STORAGE_DIR"]).resolve()
+        storage_root = Path(cast(str, app.config["STORAGE_DIR"])).resolve()
         file_path = Path(row.path)
         if not file_path.is_absolute():
             file_path = storage_root / file_path
         file_path = file_path.resolve()
         try:
-            file_path.relative_to(storage_root)
-        except ValueError:
+            # 使用统一的安全函数来解析路径
+            file_path = _safe_resolve_under_storage(row.path, storage_root)
+        except RuntimeError:
             return jsonify({"error": "document path invalid"}), 500
         if not file_path.exists():
             return jsonify({"error": "file missing on disk"}), 410
