@@ -267,10 +267,11 @@ jobs:
 
     - name: Run integration tests
       run: |
+        cd server
         timeout 30 bash -c 'until curl -f http://localhost:5001/healthz; do sleep 2; done'
 
-        if [ -d "server/test/integration" ]; then
-          pytest -v server/test/integration/
+        if [ -d "test/integration" ]; then
+          pytest -v test/integration/
         else
           # todo need to add full integration tests
           curl -f http://localhost:5001/healthz
