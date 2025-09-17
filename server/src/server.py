@@ -517,12 +517,33 @@ def create_app():
             # Don’t reveal others’ docs—just say not found
             return jsonify({"error": "document not found"}), 404
 
+        # Delete version files first (if exist) before deleting original file
+        storage_root = Path(cast(str, app.config["STORAGE_DIR"]))
+        try:
+            with get_engine().connect() as conn:
+                versions = conn.execute(
+                    text("SELECT path FROM Versions WHERE documentid = :id"),
+                    {"id": doc_id},
+                ).fetchall()
+        except Exception as e:
+            return jsonify({"error": f"database error: {str(e)}"}), 503
+
         # Resolve and delete file (best effort)
-        storage_root = Path(cast(str, app.config["STORAGE_DIR"])) # 修改
         file_deleted = False
         file_missing = False
         delete_error = None
         try:
+            # 删除每个水印版本文件
+            for version in versions:
+                version_path = _safe_resolve_under_storage(version.path, storage_root)
+                if version_path.exists():
+                    try:
+                        version_path.unlink()
+                    except Exception as e:
+                        delete_error = f"failed to delete version file: {e}"
+                        app.logger.warning("Failed to delete version file %s for doc id=%s: %s", version_path,
+                                           version.id, e)
+
             fp = _safe_resolve_under_storage(row.path, storage_root)
             if fp.exists():
                 try:
