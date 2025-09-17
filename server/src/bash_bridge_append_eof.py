@@ -1,4 +1,4 @@
-"""unsafe_bash_bridge_append_eof.py
+"""bash_bridge_append_eof.py
 
 Toy watermarking method that appends an authenticated payload *after* the
 PDF's final EOF marker but by calling a bash command. Technically you could bridge
@@ -11,15 +11,18 @@ import os
 import subprocess
 from typing import IO, Final, TypeAlias, Union
 
-from watermarking_method import WatermarkingMethod
+from watermarking_method import WatermarkingMethod, load_pdf_bytes, WatermarkingError, SecretNotFoundError
 
 PdfSource: TypeAlias = Union[bytes, str, os.PathLike[str], IO[bytes]]
 
 
-class UnsafeBashBridgeAppendEOF(WatermarkingMethod):
+class BashBridgeAppendEOF(WatermarkingMethod):
     """Toy method that appends a watermark record after the PDF EOF."""
 
     name: Final[str] = "bash-bridge-eof"
+
+    # Constants
+    _EOF_MARKER: Final[bytes] = b'%%EOF'
 
     # ---------------------
     # Public API overrides
@@ -41,12 +44,10 @@ class UnsafeBashBridgeAppendEOF(WatermarkingMethod):
         The ``position`` and ``key`` parameters are accepted for API compatibility but
         ignored by this method.
         """
-        # data = load_pdf_bytes(pdf)
-        cmd = "cat " + str(pdf.resolve()) + ' &&  printf "' + secret + '"'
+        data = load_pdf_bytes(pdf)
+        secret_bytes = secret.encode('utf-8')
 
-        res = subprocess.run(cmd, shell=True, check=True, capture_output=True)
-
-        return res.stdout
+        return data + secret_bytes
 
     def is_watermark_applicable(
         self,
@@ -59,11 +60,16 @@ class UnsafeBashBridgeAppendEOF(WatermarkingMethod):
         """Extract the secret if present.
         Prints whatever there is after %EOF
         """
-        cmd = r"sed -n '1,/^\(%%EOF\|.*%%EOF\)$/!p' " + str(pdf.resolve())
+        data = load_pdf_bytes(pdf)
+        last_eof_pos = data.rfind(self._EOF_MARKER)
 
-        res = subprocess.run(cmd, shell=True, check=True, encoding="utf-8", capture_output=True)
+        if last_eof_pos == -1:
+            raise SecretNotFoundError("No BashBridgeAppendEOF watermark found")
 
-        return res.stdout
+        start_of_secret = last_eof_pos + len(self._EOF_MARKER)
+        secret_bytes = data[start_of_secret:]
+
+        return secret_bytes.strip().decode('utf-8', errors='ignore')
 
 
-__all__ = ["UnsafeBashBridgeAppendEOF"]
+__all__ = ["BashBridgeAppendEOF"]
