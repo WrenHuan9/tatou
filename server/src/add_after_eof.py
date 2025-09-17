@@ -28,7 +28,7 @@ import json
 import os
 from typing import IO, Final, TypeAlias, Union
 
-from watermarking_method import InvalidKeyError, SecretNotFoundError, WatermarkingError, WatermarkingMethod, load_pdf_bytes
+from server.src.watermarking_method import InvalidKeyError, SecretNotFoundError, WatermarkingError, WatermarkingMethod, load_pdf_bytes
 
 PdfSource: TypeAlias = Union[bytes, str, os.PathLike[str], IO[bytes]]
 
@@ -138,9 +138,13 @@ class AddAfterEOF(WatermarkingMethod):
             raise WatermarkingError("Unsupported MAC algorithm: %r" % payload.get("alg"))
 
         try:
+            if not isinstance(payload.get("mac"), str) or not isinstance(payload.get("secret"), str):
+                raise SecretNotFoundError("Invalid payload fields")
+
             mac_hex = str(payload["mac"])  # stored as hex string
             secret_b64 = str(payload["secret"]).encode("ascii")
             secret_bytes = base64.b64decode(secret_b64)
+
         except Exception as exc:
             raise SecretNotFoundError("Invalid payload fields") from exc
 
@@ -150,9 +154,9 @@ class AddAfterEOF(WatermarkingMethod):
 
         return secret_bytes.decode("utf-8")
 
-    # ---------------------
-    # Internal helpers
-    # ---------------------
+        # ---------------------
+        # Internal helpers
+        # ---------------------
 
     def _build_payload(self, secret: str, key: str) -> bytes:
         """Build the base64url-encoded JSON payload to append."""
