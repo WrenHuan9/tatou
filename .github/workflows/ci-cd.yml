@@ -288,7 +288,7 @@ jobs:
 
     outputs:
       image-digest: ${{ steps.build.outputs.digest }}
-      image-tag: ${{ steps.meta.outputs.tags }}
+      image-tags: ${{ steps.meta.outputs.tags }}
 
     steps:
     - name: Checkout code
