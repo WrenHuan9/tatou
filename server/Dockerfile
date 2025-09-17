@@ -1,12 +1,10 @@
 # Server image: minimal Flask + Gunicorn
 FROM python:3.12-slim
 
-# 构建参数 (用于CI/CD，不影响功能)
 ARG BUILD_DATE
 ARG VCS_REF
 ARG VERSION
 
-# 轻量元数据标签
 LABEL org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}"
@@ -32,9 +30,6 @@ COPY flag /app/flag
 COPY entrypoint.sh /app/entrypoint.sh
 RUN pip install --no-cache-dir -e .
 
-# todo: temporarily health check for phase 1
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:5000/healthz || exit 1
 
 EXPOSE 5000
 
