@@ -4,7 +4,7 @@ import os
 import pickle as _std_pickle
 from functools import wraps
 from pathlib import Path
-from typing import cast # 添加
+from typing import cast
 
 from flask import Flask, g, jsonify, request, send_file
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
@@ -61,6 +61,12 @@ def create_app():
 
     def _auth_error(msg: str, code: int = 401):
         return jsonify({"error": msg}), code
+    
+    def _safe_error(user_msg: str, internal_error: Exception = None, code: int = 500):
+        """返回安全的错误信息给前端，同时记录详细错误到日志"""
+        if internal_error:
+            app.logger.error(f"Internal error: {str(internal_error)}")
+        return jsonify({"error": user_msg}), code
 
     def require_auth(f):
         @wraps(f)
@@ -140,7 +146,7 @@ def create_app():
         except IntegrityError:
             return jsonify({"error": "email or login already exists"}), 409
         except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+            return _safe_error("Failed to create user", e, 503)
 
         return jsonify({"id": row.id, "email": row.email, "login": row.login}), 201
 
@@ -160,7 +166,7 @@ def create_app():
                     {"email": email},
                 ).first()
         except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+            return _safe_error("Login failed", e, 503)
 
         if not row or not check_password_hash(row.hpassword, password):
             return jsonify({"error": "invalid credentials"}), 401
@@ -230,7 +236,7 @@ def create_app():
                     {"id": did},
                 ).one()
         except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+            return _safe_error("Failed to upload document", e, 503)
 
         return (
             jsonify(
@@ -263,7 +269,7 @@ def create_app():
                     {"uid": int(g.user["id"])},
                 ).all()
         except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+            return _safe_error("Failed to list documents", e, 503)
 
         docs = [
             {
@@ -305,7 +311,7 @@ def create_app():
                     {"glogin": str(g.user["login"]), "did": document_id},
                 ).all()
         except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+            return _safe_error("Failed to list versions", e, 503)
 
         versions = [
             {
@@ -339,7 +345,7 @@ def create_app():
                     {"glogin": str(g.user["login"])},
                 ).all()
         except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+            return _safe_error("Failed to list all versions", e, 503)
 
         versions = [
             {
@@ -380,9 +386,9 @@ def create_app():
                     {"id": document_id, "uid": int(g.user["id"])},
                 ).first()
         except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+            return _safe_error("Failed to get document", e, 503)
 
-        # Don’t leak whether a doc exists for another user
+        # Don't leak whether a doc exists for another user
         if not row:
             return jsonify({"error": "document not found"}), 404
 
@@ -431,9 +437,9 @@ def create_app():
                     {"link": link},
                 ).first()
         except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+            return _safe_error("Failed to get version", e, 503)
 
-        # Don’t leak whether a doc exists for another user
+        # Don't leak whether a doc exists for another user
         if not row:
             return jsonify({"error": "document not found"}), 404
 
@@ -511,7 +517,7 @@ def create_app():
                     {"id": doc_id, "uid": int(g.user["id"])},
                 ).first()
         except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+            return _safe_error("Failed to delete document", e, 503)
 
         if not row:
             # Don’t reveal others’ docs—just say not found
@@ -526,12 +532,12 @@ def create_app():
                     {"id": doc_id},
                 ).fetchall()
         except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+            return _safe_error("Failed to delete document", e, 503)
 
         # Resolve and delete file (best effort)
         file_deleted = False
         file_missing = False
-        delete_error = None
+        has_delete_issues = False
         try:
             # 删除每个水印版本文件
             for version in versions:
@@ -540,7 +546,7 @@ def create_app():
                     try:
                         version_path.unlink()
                     except Exception as e:
-                        delete_error = f"failed to delete version file: {e}"
+                        has_delete_issues = True
                         app.logger.warning("Failed to delete version file %s for doc id=%s: %s", version_path,
                                            version.id, e)
 
@@ -550,13 +556,14 @@ def create_app():
                     fp.unlink()
                     file_deleted = True
                 except Exception as e:
-                    delete_error = f"failed to delete file: {e}"
+                    has_delete_issues = True
                     app.logger.warning("Failed to delete file %s for doc id=%s: %s", fp, row.id, e)
             else:
                 file_missing = True
         except RuntimeError as e:
             # Path escapes storage root; refuse to touch the file
-            delete_error = str(e)
+            has_delete_issues = True
+            app.logger.error("Path security violation during delete: %s", e)
 
         # Delete DB row (will cascade to Version if FK has ON DELETE CASCADE)
         try:
@@ -566,7 +573,7 @@ def create_app():
                 # conn.execute(text("DELETE FROM Version WHERE documentid = :id"), {"id": doc_id})
                 conn.execute(text("DELETE FROM Documents WHERE id = :id"), {"id": doc_id})
         except Exception as e:
-            return jsonify({"error": f"database error during delete: {str(e)}"}), 503
+            return _safe_error("Failed to delete document", e, 503)
 
         return (
             jsonify(
@@ -575,7 +582,7 @@ def create_app():
                     "id": doc_id,
                     "file_deleted": file_deleted,
                     "file_missing": file_missing,
-                    "note": delete_error,  # null/omitted if everything was fine
+                    "has_file_issues": has_delete_issues,  # boolean flag instead of error details
                 }
             ),
             200,
@@ -631,7 +638,7 @@ def create_app():
                     {"id": doc_id, "uid": int(g.user["id"])},
                 ).first()
         except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+            return _safe_error("Failed to create watermark", e, 503)
 
         if not row:
             return jsonify({"error": "document not found"}), 404
@@ -651,7 +658,7 @@ def create_app():
             if applicable is False:
                 return jsonify({"error": "watermarking method not applicable"}), 400
         except Exception as e:
-            return jsonify({"error": f"watermark applicability check failed: {e}"}), 400
+            return _safe_error("Watermark method not supported for this document", e, 400)
 
         # apply watermark → bytes
         try:
@@ -665,7 +672,7 @@ def create_app():
             if not isinstance(wm_bytes, (bytes, bytearray)) or len(wm_bytes) == 0:
                 return jsonify({"error": "watermarking produced no output"}), 500
         except Exception as e:
-            return jsonify({"error": f"watermarking failed: {e}"}), 500
+            return _safe_error("Failed to apply watermark", e, 500)
 
         # build destination file name: "<original_name>__<intended_to>.pdf"
         base_name = Path(row.name or file_path.name).stem
@@ -681,7 +688,7 @@ def create_app():
             with dest_path.open("wb") as f:
                 f.write(wm_bytes)
         except Exception as e:
-            return jsonify({"error": f"failed to write watermarked file: {e}"}), 500
+            return _safe_error("Failed to save watermarked document", e, 500)
 
         # link token = sha1(watermarked_file_name)
         link_token = hashlib.sha1(candidate.encode("utf-8")).hexdigest()
@@ -712,7 +719,7 @@ def create_app():
                 dest_path.unlink(missing_ok=True)
             except Exception:
                 pass
-            return jsonify({"error": f"database error during version insert: {e}"}), 503
+            return _safe_error("Failed to create watermark", e, 503)
 
         return (
             jsonify(
@@ -857,7 +864,7 @@ def create_app():
                     {"id": doc_id, "uid": int(g.user["id"])},
                 ).first()
         except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+            return _safe_error("Failed to read watermark", e, 503)
 
         if not row:
             return jsonify({"error": "document not found"}), 404
@@ -880,7 +887,7 @@ def create_app():
         try:
             secret = WMUtils.read_watermark(method=method, pdf=str(file_path), key=key)
         except Exception as e:
-            return jsonify({"error": f"Error when attempting to read watermark: {e}"}), 400
+            return _safe_error("Failed to read watermark from document", e, 400)
         return jsonify({"documentid": doc_id, "secret": secret, "method": method, "position": position}), 201
 
     return app
