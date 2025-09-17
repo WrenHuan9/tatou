@@ -386,11 +386,8 @@ def create_app():
         if not row:
             return jsonify({"error": "document not found"}), 404
 
-        file_path = Path(row.path)
-
         # Basic safety: ensure path is inside STORAGE_DIR and exists
         try:
-            # 使用统一的安全函数来解析路径
             storage_root = Path(cast(str, app.config["STORAGE_DIR"]))
             file_path = _safe_resolve_under_storage(row.path, storage_root)
         except Exception as e:
@@ -440,16 +437,15 @@ def create_app():
         if not row:
             return jsonify({"error": "document not found"}), 404
 
-        # 检查是否为拥有者或管理员
+        # auth check
         if g.user["id"] != row.ownerid:
             return jsonify({"error": "forbidden"}), 403
-        
-        file_path = Path(row.path)
+
 
         # Basic safety: ensure path is inside STORAGE_DIR and exists
         try:
-            # 使用已有的安全函数来解析路径
-            file_path = _safe_resolve_under_storage(row.path, Path(app.config["STORAGE_DIR"]))
+            storage_root = Path(cast(str, app.config["STORAGE_DIR"]))
+            file_path = _safe_resolve_under_storage(row.path, storage_root)
         except Exception:
             # Path looks suspicious or outside storage
             return jsonify({"error": "document path invalid"}), 500
@@ -492,7 +488,7 @@ def create_app():
     # DELETE /api/delete-document  (and variants)
     @app.route("/api/delete-document", methods=["DELETE", "POST"])  # POST supported for convenience
     @app.route("/api/delete-document/<document_id>", methods=["DELETE"])
-    @require_auth  # 确保只有认证用户才能访问此路由
+    @require_auth
     def delete_document(document_id: int | None = None):
         # accept id from path, query (?id= / ?documentid=), or JSON body on POST
         if not document_id:
@@ -509,9 +505,7 @@ def create_app():
         # Fetch the document (enforce ownership)
         try:
             with get_engine().connect() as conn:
-                # 使用参数化查询来修复漏洞，将doc_id作为单独的参数传递
                 query = "SELECT * FROM Documents WHERE id = :id AND ownerid = :uid"
-                # 将WHERE id = :id改为同时验证文档 ID 和用户 ID。
                 row = conn.execute(
                     text(query),
                     {"id": doc_id, "uid": int(g.user["id"])},
@@ -523,12 +517,33 @@ def create_app():
             # Don’t reveal others’ docs—just say not found
             return jsonify({"error": "document not found"}), 404
 
+        # Delete version files first (if exist) before deleting original file
+        storage_root = Path(cast(str, app.config["STORAGE_DIR"]))
+        try:
+            with get_engine().connect() as conn:
+                versions = conn.execute(
+                    text("SELECT path FROM Versions WHERE documentid = :id"),
+                    {"id": doc_id},
+                ).fetchall()
+        except Exception as e:
+            return jsonify({"error": f"database error: {str(e)}"}), 503
+
         # Resolve and delete file (best effort)
-        storage_root = Path(cast(str, app.config["STORAGE_DIR"])) # 修改
         file_deleted = False
         file_missing = False
         delete_error = None
         try:
+            # 删除每个水印版本文件
+            for version in versions:
+                version_path = _safe_resolve_under_storage(version.path, storage_root)
+                if version_path.exists():
+                    try:
+                        version_path.unlink()
+                    except Exception as e:
+                        delete_error = f"failed to delete version file: {e}"
+                        app.logger.warning("Failed to delete version file %s for doc id=%s: %s", version_path,
+                                           version.id, e)
+
             fp = _safe_resolve_under_storage(row.path, storage_root)
             if fp.exists():
                 try:
@@ -623,12 +638,7 @@ def create_app():
 
         # resolve path safely under STORAGE_DIR
         storage_root = Path(cast(str, app.config["STORAGE_DIR"])).resolve()
-        file_path = Path(row.path)
-        if not file_path.is_absolute():
-            file_path = storage_root / file_path
-        file_path = file_path.resolve()
         try:
-            # 使用统一的安全函数来解析路径
             file_path = _safe_resolve_under_storage(row.path, storage_root)
         except RuntimeError:
             return jsonify({"error": "document path invalid"}), 500

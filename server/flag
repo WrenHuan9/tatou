@@ -2,4 +2,4 @@ Here is a flag demonstrating, if stolen, that an attacker managed to access info
 
 This file should be copied in the python server's container. This is currently implemented as an instruction in your Dockerfile, but if you decide to go with a different tool, don't forget to put the flag in your container.
 
-54b7a824098c0c0526dc7bc1ec7f0689a41e4bb7
+REPLACE_THIS_STRING_WITH_SERVER_FLAG
