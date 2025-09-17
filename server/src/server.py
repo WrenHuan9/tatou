@@ -63,7 +63,6 @@ def create_app():
         return jsonify({"error": msg}), code
     
     def _safe_error(user_msg: str, internal_error: Exception = None, code: int = 500):
-        """返回安全的错误信息给前端，同时记录详细错误到日志"""
         if internal_error:
             app.logger.error(f"Internal error: {str(internal_error)}")
         return jsonify({"error": user_msg}), code
@@ -534,12 +533,11 @@ def create_app():
         except Exception as e:
             return _safe_error("Failed to delete document", e, 503)
 
-        # Resolve and delete file (best effort)
+        # Resolve and delete original file and version files (best effort)
         file_deleted = False
         file_missing = False
         has_delete_issues = False
         try:
-            # 删除每个水印版本文件
             for version in versions:
                 version_path = _safe_resolve_under_storage(version.path, storage_root)
                 if version_path.exists():
@@ -871,12 +869,7 @@ def create_app():
 
         # resolve path safely under STORAGE_DIR
         storage_root = Path(cast(str, app.config["STORAGE_DIR"])).resolve()
-        file_path = Path(row.path)
-        if not file_path.is_absolute():
-            file_path = storage_root / file_path
-        file_path = file_path.resolve()
         try:
-            # 使用统一的安全函数来解析路径
             file_path = _safe_resolve_under_storage(row.path, storage_root)
         except RuntimeError:
             return jsonify({"error": "document path invalid"}), 500
