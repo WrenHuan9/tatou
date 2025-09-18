@@ -289,6 +289,7 @@ jobs:
     outputs:
       image-digest: ${{ steps.build.outputs.digest }}
       image-tags: ${{ steps.meta.outputs.tags }}
+      image-ref-for-scan: ${{ steps.prep_scan_ref.outputs.image_ref }}
 
     steps:
     - name: Checkout code
@@ -310,11 +311,19 @@ jobs:
       with:
         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         tags: |
-          type=sha
+          type=sha,format=short
+          type=raw,value=latest,enable={{is_default_branch}}
         labels: |
           org.opencontainers.image.title=Tatou PDF Watermarking Platform
           org.opencontainers.image.description=A web platform for PDF watermarking
           org.opencontainers.image.vendor=Tatou Project
+    
+    - name: Prepare single, immutable image reference for scanning
+      id: prep_scan_ref
+      run: |
+        SHA_TAG="sha-$(echo ${{ github.sha }} | cut -c1-7)"
+        IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${SHA_TAG}"
+        echo "image_ref=${IMAGE_REF}" >> $GITHUB_OUTPUT
 
     # project only, so no need to build for arm64
     - name: Build and push Docker image
@@ -343,7 +352,7 @@ jobs:
     - name: Generate SBOM
       uses: aquasecurity/trivy-action@master
       with:
-        image-ref: ${{ needs.build-and-push.outputs.image-tags }}
+        image-ref: ${{ needs.build-and-push.outputs.image-ref-for-scan }}
         scan-type: 'image'
         format: 'spdx-json'
         output: 'sbom.json'
@@ -359,7 +368,7 @@ jobs:
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@master
       with:
-        image-ref: ${{ needs.build-and-push.outputs.image-tags }}
+        image-ref: ${{ needs.build-and-push.outputs.image-ref-for-scan }}
         scan-type: 'image'
         format: 'sarif'
         output: 'trivy-results.sarif'
@@ -375,6 +384,6 @@ jobs:
       env:
         SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
       with:
-        image: ${{ needs.build-and-push.outputs.image-tags }}
+        image: ${{ needs.build-and-push.outputs.image-ref-for-scan }}
         args: --severity-threshold=high
       continue-on-error: true
