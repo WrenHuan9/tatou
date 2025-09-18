@@ -317,12 +317,14 @@ jobs:
           org.opencontainers.image.title=Tatou PDF Watermarking Platform
           org.opencontainers.image.description=A web platform for PDF watermarking
           org.opencontainers.image.vendor=Tatou Project
+          org.opencontainers.image.meta=
     
     - name: Prepare single, immutable image reference for scanning
       id: prep_scan_ref
       run: |
         SHA_TAG="sha-$(echo ${{ github.sha }} | cut -c1-7)"
-        IMAGE_REF="${{ fromJSON(steps.meta.outputs.args).labels['DOCKER_META_IMAGES'] }}:${SHA_TAG}"
+        PATH="$(echo ${{ fromJSON(steps.meta.outputs.tags)[0] }} | sed 's/.*://')"
+        IMAGE_REF="${PATH}:${SHA_TAG}"
         echo "image_ref=${IMAGE_REF}" >> $GITHUB_OUTPUT
 
     # project only, so no need to build for arm64
