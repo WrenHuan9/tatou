@@ -322,7 +322,7 @@ jobs:
       id: prep_scan_ref
       run: |
         SHA_TAG="sha-$(echo ${{ github.sha }} | cut -c1-7)"
-        PATH="$(echo ${{ fromJSON(steps.meta.outputs.json).tags[0] }} | sed 's/.*://')"
+        PATH="$(echo ${{ fromJSON(steps.meta.outputs.json).tags[0] }} | sed 's/:.*//')"
         IMAGE_REF="${PATH}:${SHA_TAG}"
         echo "image_ref=${IMAGE_REF}" >> $GITHUB_OUTPUT
 
