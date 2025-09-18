@@ -322,7 +322,7 @@ jobs:
       id: prep_scan_ref
       run: |
         SHA_TAG="sha-$(echo ${{ github.sha }} | cut -c1-7)"
-        IMAGE_REF="${{ steps.meta.outputs.images }}:${SHA_TAG}"
+        IMAGE_REF="${{ fromJSON(steps.meta.outputs.args).labels['DOCKER_META_IMAGES'] }}:${SHA_TAG}"
         echo "image_ref=${IMAGE_REF}" >> $GITHUB_OUTPUT
 
     # project only, so no need to build for arm64
