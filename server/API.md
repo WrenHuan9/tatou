@@ -321,10 +321,10 @@ Read watermark from a specific watermarked version by link. Requires authenticat
 **Return**
 ```json
 {
-  "link": "<string>",
-  "secret": "<string>",
-  "method": "<string>",
-  "position": "<string>"
+  "link": <string>,
+  "secret": <string>,
+  "method": <string>,
+  "position": <string>
 }
 ```
 

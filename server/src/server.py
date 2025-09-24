@@ -838,7 +838,7 @@ def create_app():
         try:
             specific_link = link
         except (TypeError, ValueError):
-            return jsonify({"error": "version link required"}), 400
+            return jsonify({"error": "watermarked version link required"}), 400
 
         """Read watermark from a specific watermarked version by link (requires authentication)."""
         payload = request.get_json(silent=True) or {}
@@ -867,26 +867,26 @@ def create_app():
             return _safe_error("Failed to read watermark by link", e, 503)
         
         if not row:
-            return jsonify({"error": "version file not found"}), 404
+            return jsonify({"error": "watermarked version not found"}), 404
 
         # resolve path safely under STORAGE_DIR
         storage_root = Path(cast(str, app.config["STORAGE_DIR"])).resolve()
         try:
             file_path = _safe_resolve_under_storage(row.path, storage_root)
         except RuntimeError:
-            return jsonify({"error": "version file path invalid"}), 500
+            return jsonify({"error": "watermarked version path invalid"}), 500
         if not file_path.exists():
-            return jsonify({"error": "version file missing on disk"}), 410
+            return jsonify({"error": "watermarked version missing on disk"}), 410
         
         # read watermark from the watermarked version file
         secret = None
         try:
             secret = WMUtils.read_watermark(method=method, pdf=str(file_path), key=key)
         except Exception as e:
-            return _safe_error("Failed to read watermark from version", e, 400)
+            return _safe_error("Failed to read watermark from watermarked version", e, 400)
         
         if secret != row.secret:
-            return jsonify("Failed to read watermark from version"), 400
+            return jsonify("Failed to read watermark from watermarked version"), 400
 
         return jsonify({
             "link": link,

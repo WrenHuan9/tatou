@@ -14,6 +14,7 @@ jobs:
   code-quality:
     name: Code Quality & Security Analysis
     runs-on: ubuntu-latest
+    timeout-minutes: 3
 
     steps:
     - name: Checkout code
@@ -111,6 +112,7 @@ jobs:
     name: Run Tests
     runs-on: ubuntu-latest
     needs: code-quality
+    timeout-minutes: 3
 
     services:
       mariadb:
@@ -212,6 +214,7 @@ jobs:
     name: Integration Tests
     runs-on: ubuntu-latest
     needs: code-quality
+    timeout-minutes: 3
 
     services:
       mariadb:
@@ -282,6 +285,7 @@ jobs:
     name: Build & Push Docker Image
     runs-on: ubuntu-latest
     needs: [code-quality, test, integration-test]
+    timeout-minutes: 3
     permissions:
       contents: read
       packages: write
@@ -348,6 +352,7 @@ jobs:
     name: Container Security Scan
     runs-on: ubuntu-latest
     needs: build-and-push
+    timeout-minutes: 2
 
     steps:
     - name: Generate SBOM
