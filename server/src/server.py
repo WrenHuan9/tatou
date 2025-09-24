@@ -1,5 +1,6 @@
 import datetime as dt
 import hashlib
+import secrets
 import os
 import pickle as _std_pickle
 from functools import wraps
@@ -682,8 +683,9 @@ def create_app():
         except Exception as e:
             return _safe_error("Failed to save watermarked document", e, 500)
 
-        # link token = sha1(watermarked_file_name)
-        link_token = hashlib.sha1(candidate.encode("utf-8")).hexdigest()
+        timestamp = dt.datetime.utcnow().isoformat()
+        random_part = secrets.token_hex(16)
+        link_token = hashlib.sha256(f"{candidate}_{timestamp}_{random_part}".encode("utf-8")).hexdigest()
 
         try:
             with get_engine().begin() as conn:
