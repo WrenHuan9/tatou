@@ -830,7 +830,6 @@ def create_app():
     @app.post("/api/read-watermark-by-link/<link>")
     @require_auth
     def read_watermark_by_link(link: str | None = None):
-        # accept link from path, query (?link=), or JSON body on POST
         if not link:
             link = (
                 request.args.get("link")
@@ -841,7 +840,7 @@ def create_app():
         except (TypeError, ValueError):
             return jsonify({"error": "version link required"}), 400
 
-        """Read watermark from a specific version by link (requires authentication)."""
+        """Read watermark from a specific watermarked version by link (requires authentication)."""
         payload = request.get_json(silent=True) or {}
         method = payload.get("method")
         position = payload.get("position") or None
@@ -850,7 +849,6 @@ def create_app():
         if not method or not key or not isinstance(key, str):
             return jsonify({"error": "method, and key are required"}), 400
 
-        # lookup the version by link (no auth required for public links)
         try:
             with get_engine().connect() as conn:
                 row = conn.execute(
@@ -880,7 +878,7 @@ def create_app():
         if not file_path.exists():
             return jsonify({"error": "version file missing on disk"}), 410
         
-        # read watermark from the version file
+        # read watermark from the watermarked version file
         secret = None
         try:
             secret = WMUtils.read_watermark(method=method, pdf=str(file_path), key=key)
@@ -888,7 +886,7 @@ def create_app():
             return _safe_error("Failed to read watermark from version", e, 400)
         
         if secret != row.secret:
-            return _safe_error("Failed to read watermark from version", e, 400)
+            return jsonify("Failed to read watermark from version"), 400
 
         return jsonify({
             "link": link,

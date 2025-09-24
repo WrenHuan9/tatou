@@ -301,7 +301,7 @@ _None_
 **Specification**
  * The endpoint MUST return all methods in `watermarking_utils.METHODS`.
 
-   ## read-watermark-by-link
+  ## read-watermark-by-link
 
 **Description**
 Read watermark from a specific watermarked version by link. Requires authentication.
