@@ -21,7 +21,7 @@ except Exception:  # dill is optional
 
 
 import watermarking_utils as WMUtils
-from watermarking_method import WatermarkingMethod
+from watermarking_method import WatermarkingMethod, is_pdf_bytes
 
 # from watermarking_utils import METHODS, apply_watermark, read_watermark, explore_pdf, is_watermarking_applicable, get_method
 
@@ -194,6 +194,18 @@ def create_app():
             return jsonify({"error": "empty filename"}), 400
 
         fname = file.filename
+        
+        # Check file extension
+        if not fname.lower().endswith('.pdf'):
+            return jsonify({"error": "only PDF files are allowed"}), 400
+        
+        # Read file content to validate it's actually a PDF
+        file_content = file.read()
+        file.seek(0)  # Reset file pointer for later save
+        
+        # Validate PDF content
+        if not is_pdf_bytes(file_content):
+            return jsonify({"error": "file does not appear to be a valid PDF"}), 400
 
         user_dir = app.config["STORAGE_DIR"] / "files" / g.user["login"]
         user_dir.mkdir(parents=True, exist_ok=True)
