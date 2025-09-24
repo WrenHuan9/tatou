@@ -826,70 +826,76 @@ def create_app():
 
         return jsonify({"methods": methods, "count": len(methods)}), 200
 
-    # POST /api/read-watermark
-    @app.post("/api/read-watermark")
-    @app.post("/api/read-watermark/<int:document_id>")
+    # POST /api/read-watermark-by-link/
+    @app.post("/api/read-watermark-by-link/<link>")
     @require_auth
-    def read_watermark(document_id: int | None = None):
-        # accept id from path, query (?id= / ?documentid=), or JSON body on POST
-        if not document_id:
-            document_id = (
-                request.args.get("id")
-                or request.args.get("documentid")
-                or (request.is_json and (request.get_json(silent=True) or {}).get("id"))
+    def read_watermark_by_link(link: str | None = None):
+        # accept link from path, query (?link=), or JSON body on POST
+        if not link:
+            link = (
+                request.args.get("link")
+                or (request.is_json and (request.get_json(silent=True) or {}).get("link"))
             )
         try:
-            doc_id = document_id
+            specific_link = link
         except (TypeError, ValueError):
-            return jsonify({"error": "document id required"}), 400
+            return jsonify({"error": "version link required"}), 400
 
+        """Read watermark from a specific version by link (requires authentication)."""
         payload = request.get_json(silent=True) or {}
-        # allow a couple of aliases for convenience
         method = payload.get("method")
         position = payload.get("position") or None
         key = payload.get("key")
-
-        # validate input
-        try:
-            doc_id = int(doc_id)
-        except (TypeError, ValueError):
-            return jsonify({"error": "document_id (int) is required"}), 400
-        if not method or not isinstance(key, str):
+        
+        if not method or not key or not isinstance(key, str):
             return jsonify({"error": "method, and key are required"}), 400
 
-        # lookup the document; FIXME enforce ownership
+        # lookup the version by link (no auth required for public links)
         try:
             with get_engine().connect() as conn:
                 row = conn.execute(
                     text(
                         """
-                        SELECT id, name, path
-                        FROM Documents
-                        WHERE id = :id AND ownerid = :uid
-                    """),
-                    {"id": doc_id, "uid": int(g.user["id"])},
+                        SELECT v.id, v.documentid, v.link, v.secret, v.path
+                        FROM Versions v
+                        JOIN Documents d ON d.id = v.documentid
+                        WHERE v.link = :link AND d.ownerid = :uid
+                        LIMIT 1
+                    """
+                    ),
+                    {"link": specific_link, "uid": int(g.user["id"])},
                 ).first()
         except Exception as e:
-            return _safe_error("Failed to read watermark", e, 503)
-
+            return _safe_error("Failed to read watermark by link", e, 503)
+        
         if not row:
-            return jsonify({"error": "document not found"}), 404
+            return jsonify({"error": "version file not found"}), 404
 
         # resolve path safely under STORAGE_DIR
         storage_root = Path(cast(str, app.config["STORAGE_DIR"])).resolve()
         try:
             file_path = _safe_resolve_under_storage(row.path, storage_root)
         except RuntimeError:
-            return jsonify({"error": "document path invalid"}), 500
+            return jsonify({"error": "version file path invalid"}), 500
         if not file_path.exists():
-            return jsonify({"error": "file missing on disk"}), 410
-
+            return jsonify({"error": "version file missing on disk"}), 410
+        
+        # read watermark from the version file
         secret = None
         try:
             secret = WMUtils.read_watermark(method=method, pdf=str(file_path), key=key)
         except Exception as e:
-            return _safe_error("Failed to read watermark from document", e, 400)
-        return jsonify({"documentid": doc_id, "secret": secret, "method": method, "position": position}), 201
+            return _safe_error("Failed to read watermark from version", e, 400)
+        
+        if secret != row.secret:
+            return _safe_error("Failed to read watermark from version", e, 400)
+
+        return jsonify({
+            "link": link,
+            "secret": secret,
+            "method": method,
+            "position": position
+        }), 200
 
     return app
 

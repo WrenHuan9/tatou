@@ -47,6 +47,14 @@ class BashBridgeAppendEOF(WatermarkingMethod):
         data = load_pdf_bytes(pdf)
         secret_bytes = secret.encode('utf-8')
 
+        # Ensure there's a %%EOF marker before appending the secret
+        # This makes the read logic consistent
+        if not data.endswith(self._EOF_MARKER):
+            # Add %%EOF if not present (for consistency with read logic)
+            if not data.endswith(b'\n'):
+                data += b'\n'
+            data += self._EOF_MARKER
+
         return data + secret_bytes
 
     def is_watermark_applicable(
@@ -58,7 +66,7 @@ class BashBridgeAppendEOF(WatermarkingMethod):
 
     def read_secret(self, pdf, key: str) -> str:
         """Extract the secret if present.
-        Prints whatever there is after %EOF
+        Extracts whatever there is after the last %%EOF marker.
         """
         data = load_pdf_bytes(pdf)
         last_eof_pos = data.rfind(self._EOF_MARKER)
@@ -69,7 +77,14 @@ class BashBridgeAppendEOF(WatermarkingMethod):
         start_of_secret = last_eof_pos + len(self._EOF_MARKER)
         secret_bytes = data[start_of_secret:]
 
-        return secret_bytes.strip().decode('utf-8', errors='ignore')
+        # Check if there's actually secret data
+        if not secret_bytes.strip():
+            raise SecretNotFoundError("Found EOF marker but no secret data")
+
+        try:
+            return secret_bytes.strip().decode('utf-8')
+        except UnicodeDecodeError as e:
+            raise SecretNotFoundError(f"Secret data contains invalid UTF-8: {e}")
 
 
 __all__ = ["BashBridgeAppendEOF"]
