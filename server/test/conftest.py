@@ -115,13 +115,23 @@ def app(app_config: dict) -> Flask:
     # Set environment variables for the app
     for key, value in app_config.items():
         os.environ[key] = str(value)
+
+    with patch('sqlalchemy.create_engine') as mock_create_engine:
+        mock_conn = MagicMock()
+        mock_engine = MagicMock()
+        mock_create_engine.return_value = mock_engine
+        mock_engine.connect.return_value.__enter__.return_value = mock_conn
+        mock_engine.begin.return_value.__enter__.return_value = mock_conn
     
-    # Import and create app after setting env vars
-    from server.src.server import create_app
-    app = create_app()
-    app.config.update(app_config)
+        # Import and create app after setting env vars
+        from server.src.server import create_app
+        app = create_app()
+        app.config.update(app_config)
+
+        app.config['mock_db_engine'] = mock_engine
+        app.config['mock_db_conn'] = mock_conn
     
-    yield app
+        yield app
     
     # Cleanup
     for key in app_config.keys():
