@@ -438,14 +438,8 @@ def create_app():
         except Exception as e:
             return _safe_error("Failed to get version", e, 503)
 
-        # Don't leak whether a doc exists for another user
         if not row:
             return jsonify({"error": "document not found"}), 404
-
-        # auth check
-        if g.user["id"] != row.ownerid:
-            return jsonify({"error": "forbidden"}), 403
-
 
         # Basic safety: ensure path is inside STORAGE_DIR and exists
         try:
