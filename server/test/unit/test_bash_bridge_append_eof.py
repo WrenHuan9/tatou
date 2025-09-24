@@ -6,8 +6,8 @@ from io import BytesIO
 
 import pytest
 
-from server.src.bash_bridge_append_eof import BashBridgeAppendEOF
-from server.src.watermarking_method import SecretNotFoundError, WatermarkingMethod
+from bash_bridge_append_eof import BashBridgeAppendEOF
+from watermarking_method import SecretNotFoundError, WatermarkingMethod
 
 
 class TestBashBridgeAppendEOF:
