@@ -37,33 +37,39 @@
     </section>
   </main>
 
-  <script>
-    const form = document.getElementById('loginForm');
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const data = {
-        email: form.email.value,
-        password: form.password.value
-      };
-      try {
-        const resp = await fetch('/api/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data)
-        });
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => ({}));
-          alert('Error: ' + (err.message || resp.statusText));
-          return;
-        }
-        const result = await resp.json();
-        localStorage.setItem('authToken', result.token);
-        alert('Welcome back!');
-        window.location.href = 'documents.html';
-      } catch (err) {
-        alert('Network error: ' + err.message);
+ <script>
+  (function() {
+    const token = localStorage.getItem('authToken');
+    if (token) {
+      window.location.href = 'documents.html';
+    }
+  })();
+  const form = document.getElementById('loginForm');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const data = {
+      email: form.email.value,
+      password: form.password.value
+    };
+    try {
+      const resp = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        alert('Error: ' + (err.message || resp.statusText));
+        return;
       }
-    });
-  </script>
+      const result = await resp.json();
+      localStorage.setItem('authToken', result.token);
+      alert('Welcome back!');
+      window.location.href = 'documents.html';
+    } catch (err) {
+      alert('Network error: ' + err.message);
+    }
+  });
+ </script>
 </body>
 </html>
