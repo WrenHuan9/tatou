@@ -70,7 +70,7 @@ class TestMetadataWatermark(unittest.TestCase):
         # Case 1: 正常的 PDF 应该是适用的
         self.assertTrue(self.impl.is_watermark_applicable(self.original_pdf_bytes))
 
-        # Case 2: 无法解析的垃圾数据不适用
+        # Case 2: 无法解析的垃圾数据不适用 (覆盖 PdfReadError)
         unparseable_pdf = b"%PDF-this-is-not-a-valid-pdf"
         self.assertFalse(self.impl.is_watermark_applicable(unparseable_pdf))
 
@@ -81,6 +81,15 @@ class TestMetadataWatermark(unittest.TestCase):
             mock_reader_class.return_value = mock_reader_instance
 
             # 即使输入是有效的PDF字节，由于 mock 返回无页面，结果也应为 False
+            self.assertFalse(self.impl.is_watermark_applicable(self.original_pdf_bytes))
+
+    def test_applicability_generic_exception(self):
+        """测试 is_watermark_applicable 能处理通用异常 (覆盖 except Exception)"""
+        with patch('metadata_watermark.pypdf.PdfReader') as mock_reader_class:
+            # 配置 mock 在被调用时，直接抛出一个通用的 Exception
+            mock_reader_class.side_effect = Exception("Unexpected parsing error")
+
+            # 方法应该能捕获这个通用异常并返回 False
             self.assertFalse(self.impl.is_watermark_applicable(self.original_pdf_bytes))
 
     def _create_pdf_with_raw_payload(self, payload: str) -> bytes:
@@ -106,6 +115,12 @@ class TestMetadataWatermark(unittest.TestCase):
                 malformed_pdf = self._create_pdf_with_raw_payload(payload)
                 with self.assertRaises(SecretNotFoundError):
                     self.impl.read_secret(malformed_pdf, self.key)
+
+    def test_get_usage(self):
+        """测试 get_usage 方法 (覆盖 return 语句)"""
+        usage_string = self.impl.get_usage()
+        self.assertIsInstance(usage_string, str)
+        self.assertIn("metadata", usage_string.lower())
 
 
 if __name__ == '__main__':
