@@ -23,7 +23,7 @@ def temp_storage() -> Generator[Path, None, None]:
 def sample_pdf_bytes() -> bytes:
     """Minimal but valid PDF bytes for testing."""
     return (
-        b"%PDF-1.4\n"
+        b"%PDF-1.7\n"
         b"1 0 obj\n"
         b"<< /Type /Catalog /Pages 2 0 R >>\n"
         b"endobj\n"
@@ -37,12 +37,12 @@ def sample_pdf_bytes() -> bytes:
         b"0 4\n"
         b"0000000000 65535 f \n"
         b"0000000009 00000 n \n"
-        b"0000000074 00000 n \n"
-        b"0000000120 00000 n \n"
+        b"0000000056 00000 n \n"
+        b"0000000111 00000 n \n"
         b"trailer\n"
         b"<< /Size 4 /Root 1 0 R >>\n"
         b"startxref\n"
-        b"202\n"
+        b"178\n"
         b"%%EOF"
     )
 
@@ -50,7 +50,7 @@ def sample_pdf_bytes() -> bytes:
 def pdf_without_eof() -> bytes:
     """Minimal but valid PDF bytes for testing."""
     return (
-        b"%PDF-1.4\n"
+        b"%PDF-1.7\n"
         b"1 0 obj\n"
         b"<< /Type /Catalog /Pages 2 0 R >>\n"
         b"endobj\n"
@@ -64,12 +64,12 @@ def pdf_without_eof() -> bytes:
         b"0 4\n"
         b"0000000000 65535 f \n"
         b"0000000009 00000 n \n"
-        b"0000000074 00000 n \n"
-        b"0000000120 00000 n \n"
+        b"0000000056 00000 n \n"
+        b"0000000111 00000 n \n"
         b"trailer\n"
         b"<< /Size 4 /Root 1 0 R >>\n"
         b"startxref\n"
-        b"202\n"
+        b"178\n"
         # Note: no %%EOF marker
     )
 

@@ -155,7 +155,7 @@ class TestGeneralAPI:
                 
                 response = client.get(f"/{filename}")
                 
-                mock_send_static.assert_called_once_with(filename)
+                mock_send_static.assert_called_once_with(filename=filename)
     
     def test_static_files_nested_path(self, client: FlaskClient):
         """Test static file serving with nested paths."""
@@ -172,7 +172,7 @@ class TestGeneralAPI:
                 
                 response = client.get(f"/{filepath}")
                 
-                mock_send_static.assert_called_once_with(filepath)
+                mock_send_static.assert_called_once_with(filename=filepath)
     
     def test_nonexistent_endpoint(self, client: FlaskClient):
         """Test accessing non-existent endpoint returns 404."""

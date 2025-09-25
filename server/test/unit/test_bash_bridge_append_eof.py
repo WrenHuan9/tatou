@@ -423,7 +423,7 @@ class TestBashBridgeAppendEOF:
         watermarked = method.add_watermark(sample_pdf_bytes, secret, key)
         
         # Original PDF structure should be preserved
-        assert watermarked.startswith(b"%PDF-1.4")
+        assert watermarked.startswith(b"%PDF-1.7")
         assert b"%%EOF" in watermarked
         
         # The secret should be appended after the original content

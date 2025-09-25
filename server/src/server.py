@@ -27,7 +27,7 @@ from watermarking_method import WatermarkingMethod, is_pdf_bytes
 
 
 def create_app():
-    app = Flask(__name__)
+    app = Flask(__name__, static_folder=str(Path(__file__).parent / "static"), static_url_path="")
 
     # --- Config ---
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
