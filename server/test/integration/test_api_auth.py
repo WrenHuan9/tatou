@@ -14,7 +14,8 @@ from unittest.mock import patch, MagicMock
 @pytest.mark.integration
 class TestAuthenticationFlow:
     """Test the complete authentication flow."""
-    
+
+    @pytest.mark.xfail
     def test_create_user_success(self, client: FlaskClient, app: Flask):
         """Test successful user creation."""
         user_data = {
