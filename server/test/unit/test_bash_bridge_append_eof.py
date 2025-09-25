@@ -6,8 +6,8 @@ from io import BytesIO
 
 import pytest
 
-from server.src.bash_bridge_append_eof import BashBridgeAppendEOF
-from server.src.watermarking_method import SecretNotFoundError, WatermarkingMethod
+from bash_bridge_append_eof import BashBridgeAppendEOF
+from watermarking_method import SecretNotFoundError, WatermarkingMethod
 
 
 class TestBashBridgeAppendEOF:
@@ -184,9 +184,9 @@ class TestBashBridgeAppendEOF:
         method = BashBridgeAppendEOF()
         key = "test-key"
         
-        # PDF with %%EOF marker but no watermark should return empty string
-        result = method.read_secret(sample_pdf_bytes, key)
-        assert result == ""
+        # PDF with %%EOF marker but no watermark should raise SecretNotFoundError
+        with pytest.raises(SecretNotFoundError, match="Found EOF marker but no secret data"):
+            method.read_secret(sample_pdf_bytes, key)
     
     def test_read_secret_with_watermarked_pdf(self, sample_pdf_bytes: bytes):
         """Test read_secret with watermarked PDF correctly extracts the secret."""
@@ -206,18 +206,18 @@ class TestBashBridgeAppendEOF:
         method = BashBridgeAppendEOF()
         key = "test-key"
         
-        # File path with %%EOF marker but no watermark should return empty string
-        result = method.read_secret(sample_pdf_file, key)
-        assert result == ""
+        # File path with %%EOF marker but no watermark should raise SecretNotFoundError
+        with pytest.raises(SecretNotFoundError, match="Found EOF marker but no secret data"):
+            method.read_secret(sample_pdf_file, key)
     
     def test_read_secret_with_string_path(self, sample_pdf_file: Path):
         """Test read_secret with string path input returns empty string when no watermark exists."""
         method = BashBridgeAppendEOF()
         key = "test-key"
         
-        # String path with %%EOF marker but no watermark should return empty string
-        result = method.read_secret(str(sample_pdf_file), key)
-        assert result == ""
+        # String path with %%EOF marker but no watermark should raise SecretNotFoundError
+        with pytest.raises(SecretNotFoundError, match="Found EOF marker but no secret data"):
+            method.read_secret(str(sample_pdf_file), key)
     
     def test_read_secret_with_file_object(self, sample_pdf_bytes: bytes):
         """Test read_secret with file-like object input returns empty string when no watermark exists."""
@@ -225,61 +225,44 @@ class TestBashBridgeAppendEOF:
         key = "test-key"
         
         pdf_file = BytesIO(sample_pdf_bytes)
-        # File object with %%EOF marker but no watermark should return empty string
-        result = method.read_secret(pdf_file, key)
-        assert result == ""
+        # File object with %%EOF marker but no watermark should raise SecretNotFoundError
+        with pytest.raises(SecretNotFoundError, match="Found EOF marker but no secret data"):
+            method.read_secret(pdf_file, key)
     
     def test_read_secret_key_parameter_ignored(self, sample_pdf_bytes: bytes):
         """Test that key parameter is ignored in read_secret method.
         
         The key parameter is accepted for API compatibility but completely ignored.
-        The method always extracts whatever is after the last %%EOF marker.
+        All key value reads should throw SecretNotFoundError since there's no secret data after EOF.
         """
         method = BashBridgeAppendEOF()
         
-        # All return the same result regardless of key (empty string for no watermark)
-        result1 = method.read_secret(sample_pdf_bytes, "key1")
-        result2 = method.read_secret(sample_pdf_bytes, "key2")
-        result3 = method.read_secret(sample_pdf_bytes, "completely-different-key")
-        result4 = method.read_secret(sample_pdf_bytes, "")  # Empty key
-        result5 = method.read_secret(sample_pdf_bytes, "🔑🗝️")  # Unicode key
-        result6 = method.read_secret(sample_pdf_bytes, "super-long-key-that-would-normally-matter")
+        # All should raise SecretNotFoundError regardless of key value since there's no secret data
+        with pytest.raises(SecretNotFoundError, match="Found EOF marker but no secret data"):
+            method.read_secret(sample_pdf_bytes, "key1")
         
-        # All results should be identical regardless of key value
-        assert result1 == result2 == result3 == result4 == result5 == result6 == ""
+        with pytest.raises(SecretNotFoundError, match="Found EOF marker but no secret data"):
+            method.read_secret(sample_pdf_bytes, "key2")
+        
+        with pytest.raises(SecretNotFoundError, match="Found EOF marker but no secret data"):
+            method.read_secret(sample_pdf_bytes, "completely-different-key")
+        
+        with pytest.raises(SecretNotFoundError, match="Found EOF marker but no secret data"):
+            method.read_secret(sample_pdf_bytes, "")  # Empty key
+        
+        with pytest.raises(SecretNotFoundError, match="Found EOF marker but no secret data"):
+            method.read_secret(sample_pdf_bytes, "🔑🗝️")  # Unicode key
+        
+        with pytest.raises(SecretNotFoundError, match="Found EOF marker but no secret data"):
+            method.read_secret(sample_pdf_bytes, "super-long-key-that-would-normally-matter")
 
-    @pytest.mark.xfail
-    def test_pdf_without_eof_marker(self):
+    def test_pdf_without_eof_marker(self, pdf_without_eof: bytes):
         """Test behavior with PDF that doesn't contain %%EOF marker.
         
         When no %%EOF marker is found, the method should raise SecretNotFoundError.
         """
         method = BashBridgeAppendEOF()
-        
-        # Create a valid PDF without %%EOF marker (this is unusual but possible)
-        pdf_without_eof = (
-            b"%PDF-1.4\n"
-            b"1 0 obj\n"
-            b"<< /Type /Catalog /Pages 2 0 R >>\n"
-            b"endobj\n"
-            b"2 0 obj\n"
-            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>\n"
-            b"endobj\n"
-            b"3 0 obj\n"
-            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\n"
-            b"endobj\n"
-            b"xref\n"
-            b"0 4\n"
-            b"0000000000 65535 f \n"
-            b"0000000009 00000 n \n"
-            b"0000000074 00000 n \n"
-            b"0000000120 00000 n \n"
-            b"trailer\n"
-            b"<< /Size 4 /Root 1 0 R >>\n"
-            b"startxref\n"
-            b"202\n"
-            # Note: no %%EOF marker
-        )
+        key = "test-key"
         
         # When rfind returns -1 (no %%EOF found), should raise SecretNotFoundError
         with pytest.raises(SecretNotFoundError, match="No BashBridgeAppendEOF watermark found"):
@@ -289,7 +272,6 @@ class TestBashBridgeAppendEOF:
         """Test class constants are properly defined."""
         assert BashBridgeAppendEOF._EOF_MARKER == b'%%EOF'
 
-    @pytest.mark.xfail
     def test_method_inheritance(self):
         """Test that class properly inherits from WatermarkingMethod."""
         method = BashBridgeAppendEOF()
@@ -466,11 +448,10 @@ class TestBashBridgeAppendEOF:
         non_utf8_data = b"\xff\xfe\x00invalid utf8 data"
         pdf_with_non_utf8 = sample_pdf_bytes + non_utf8_data
         
-        # Should handle non-UTF8 data gracefully with errors='ignore'
-        result = method.read_secret(pdf_with_non_utf8, "test-key")
-        assert isinstance(result, str)
-        # Content should be decoded with errors='ignore', so some chars may be missing
-    
+        # Should raise SecretNotFoundError since non-UTF8 data is not valid UTF-8
+        with pytest.raises(SecretNotFoundError, match="Secret data contains invalid UTF-8"):
+            method.read_secret(pdf_with_non_utf8, "test-key")
+
     def test_eof_marker_constant_is_correct(self):
         """Test that the EOF marker constant is correctly defined."""
         assert BashBridgeAppendEOF._EOF_MARKER == b'%%EOF'
@@ -498,9 +479,9 @@ class TestBashBridgeAppendEOF:
         # Create a minimal valid PDF with just %%EOF
         minimal_pdf = b"%PDF-1.4\n%%EOF"
         
-        # Should return empty string since nothing is after %%EOF
-        result = method.read_secret(minimal_pdf, "test-key")
-        assert result == ""
+        # Should raise SecretNotFoundError since nothing is after %%EOF
+        with pytest.raises(SecretNotFoundError, match="Found EOF marker but no secret data"):
+            method.read_secret(minimal_pdf, "")
     
     def test_method_works_with_pathlib_path(self, sample_pdf_file: Path):
         """Test that method works correctly with pathlib.Path objects."""

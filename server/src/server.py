@@ -1,5 +1,6 @@
 import datetime as dt
 import hashlib
+import secrets
 import os
 import pickle as _std_pickle
 from functools import wraps
@@ -20,7 +21,7 @@ except Exception:  # dill is optional
 
 
 import watermarking_utils as WMUtils
-from watermarking_method import WatermarkingMethod
+from watermarking_method import WatermarkingMethod, is_pdf_bytes
 
 # from watermarking_utils import METHODS, apply_watermark, read_watermark, explore_pdf, is_watermarking_applicable, get_method
 
@@ -193,6 +194,18 @@ def create_app():
             return jsonify({"error": "empty filename"}), 400
 
         fname = file.filename
+        
+        # Check file extension
+        if not fname.lower().endswith('.pdf'):
+            return jsonify({"error": "only PDF files are allowed"}), 400
+        
+        # Read file content to validate it's actually a PDF
+        file_content = file.read()
+        file.seek(0)  # Reset file pointer for later save
+        
+        # Validate PDF content
+        if not is_pdf_bytes(file_content):
+            return jsonify({"error": "file does not appear to be a valid PDF"}), 400
 
         user_dir = app.config["STORAGE_DIR"] / "files" / g.user["login"]
         user_dir.mkdir(parents=True, exist_ok=True)
@@ -438,14 +451,8 @@ def create_app():
         except Exception as e:
             return _safe_error("Failed to get version", e, 503)
 
-        # Don't leak whether a doc exists for another user
         if not row:
             return jsonify({"error": "document not found"}), 404
-
-        # auth check
-        if g.user["id"] != row.ownerid:
-            return jsonify({"error": "forbidden"}), 403
-
 
         # Basic safety: ensure path is inside STORAGE_DIR and exists
         try:
@@ -688,8 +695,9 @@ def create_app():
         except Exception as e:
             return _safe_error("Failed to save watermarked document", e, 500)
 
-        # link token = sha1(watermarked_file_name)
-        link_token = hashlib.sha1(candidate.encode("utf-8")).hexdigest()
+        timestamp = dt.datetime.utcnow().isoformat()
+        random_part = secrets.token_hex(16)
+        link_token = hashlib.sha256(f"{candidate}_{timestamp}_{random_part}".encode("utf-8")).hexdigest()
 
         try:
             with get_engine().begin() as conn:
@@ -818,70 +826,74 @@ def create_app():
 
         return jsonify({"methods": methods, "count": len(methods)}), 200
 
-    # POST /api/read-watermark
-    @app.post("/api/read-watermark")
-    @app.post("/api/read-watermark/<int:document_id>")
+    # POST /api/read-watermark-by-link/
+    @app.post("/api/read-watermark-by-link/<link>")
     @require_auth
-    def read_watermark(document_id: int | None = None):
-        # accept id from path, query (?id= / ?documentid=), or JSON body on POST
-        if not document_id:
-            document_id = (
-                request.args.get("id")
-                or request.args.get("documentid")
-                or (request.is_json and (request.get_json(silent=True) or {}).get("id"))
+    def read_watermark_by_link(link: str | None = None):
+        if not link:
+            link = (
+                request.args.get("link")
+                or (request.is_json and (request.get_json(silent=True) or {}).get("link"))
             )
         try:
-            doc_id = document_id
+            specific_link = link
         except (TypeError, ValueError):
-            return jsonify({"error": "document id required"}), 400
+            return jsonify({"error": "watermarked version link required"}), 400
 
+        """Read watermark from a specific watermarked version by link (requires authentication)."""
         payload = request.get_json(silent=True) or {}
-        # allow a couple of aliases for convenience
         method = payload.get("method")
         position = payload.get("position") or None
         key = payload.get("key")
-
-        # validate input
-        try:
-            doc_id = int(doc_id)
-        except (TypeError, ValueError):
-            return jsonify({"error": "document_id (int) is required"}), 400
-        if not method or not isinstance(key, str):
+        
+        if not method or not key or not isinstance(key, str):
             return jsonify({"error": "method, and key are required"}), 400
 
-        # lookup the document; FIXME enforce ownership
         try:
             with get_engine().connect() as conn:
                 row = conn.execute(
                     text(
                         """
-                        SELECT id, name, path
-                        FROM Documents
-                        WHERE id = :id AND ownerid = :uid
-                    """),
-                    {"id": doc_id, "uid": int(g.user["id"])},
+                        SELECT v.id, v.documentid, v.link, v.secret, v.path
+                        FROM Versions v
+                        JOIN Documents d ON d.id = v.documentid
+                        WHERE v.link = :link AND d.ownerid = :uid
+                        LIMIT 1
+                    """
+                    ),
+                    {"link": specific_link, "uid": int(g.user["id"])},
                 ).first()
         except Exception as e:
-            return _safe_error("Failed to read watermark", e, 503)
-
+            return _safe_error("Failed to read watermark by link", e, 503)
+        
         if not row:
-            return jsonify({"error": "document not found"}), 404
+            return jsonify({"error": "watermarked version not found"}), 404
 
         # resolve path safely under STORAGE_DIR
         storage_root = Path(cast(str, app.config["STORAGE_DIR"])).resolve()
         try:
             file_path = _safe_resolve_under_storage(row.path, storage_root)
         except RuntimeError:
-            return jsonify({"error": "document path invalid"}), 500
+            return jsonify({"error": "watermarked version path invalid"}), 500
         if not file_path.exists():
-            return jsonify({"error": "file missing on disk"}), 410
-
+            return jsonify({"error": "watermarked version missing on disk"}), 410
+        
+        # read watermark from the watermarked version file
         secret = None
         try:
             secret = WMUtils.read_watermark(method=method, pdf=str(file_path), key=key)
         except Exception as e:
-            return _safe_error("Failed to read watermark from document", e, 400)
-        return jsonify({"documentid": doc_id, "secret": secret, "method": method, "position": position}), 201
+            return _safe_error("Failed to read watermark from watermarked version", e, 400)
+        
+        if secret != row.secret:
+            return jsonify("Failed to read watermark from watermarked version"), 400
+
+        return jsonify({
+            "link": link,
+            "secret": secret,
+            "method": method,
+            "position": position
+        }), 200
 
     return app
 

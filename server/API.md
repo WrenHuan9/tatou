@@ -23,9 +23,7 @@
   - **GET** `/api/list-versions/<int:document_id>`
   - **GET** `/api/list-versions`
 - [login](#login) — **POST** `/api/login`
-- [read-watermark](#read-watermark)
-  - **POST** `/api/read-watermark/<int:document_id>`
-  - **POST** `/api/read-watermark`
+- [read-watermark-by-link](#read-watermark-by-link) —  **POST** `/api/read-watermark-by-link/<link>`
 - [upload-document](#upload-document) — **POST** `/api/upload-document`
 - [rmap-initiate](#rmap-initiate) — **POST** `/api/rmap-initiate`
 - [rmap-get-link](#rmap-get-link) — **POST** `/api/rmap-get-link`
@@ -303,27 +301,13 @@ _None_
 **Specification**
  * The endpoint MUST return all methods in `watermarking_utils.METHODS`.
 
-   ## read-watermark
+  ## read-watermark-by-link
 
 **Description**
-This endpoint reads information contain in a pdf document's watermark with the provided method.
+Read watermark from a specific watermarked version by link. Requires authentication.
 
 **Path**
-`POST /api/read-watermark`
-
-**Parameters**
-```json
-{
-    "method": <string>,
-    "position": <string>,
-    "key": <string>,
-    "id": <int>
-}
-```
-
-**Path**
-`POST /api/read-watermark<int:document_id>`
-
+`POST /api/read-watermark-by-link/<link>`
 
 **Parameters**
 ```json
@@ -334,14 +318,13 @@ This endpoint reads information contain in a pdf document's watermark with the p
 }
 ```
 
-
 **Return**
 ```json
 {
-    "documentid": <int>,
-    "secret": <string>,
-    "method": <string>,
-    "position": <string>
+  "link": <string>,
+  "secret": <string>,
+  "method": <string>,
+  "position": <string>
 }
 ```
 
@@ -491,3 +474,4 @@ should decrypt to:
 
 **Specification**
  * `get-version/<result>` SHOULD point to a watermarked version of a PDF specific to the group authenticated by the public key of the client.
+

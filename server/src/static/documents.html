@@ -254,6 +254,7 @@
       const options = methods.map(m => `<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)} — ${escapeHtml(m.description||'')}</option>`).join('');
       openModal('Read watermark for #' + documentId, `
         <form id="readWmForm" class="form-vertical">
+          <label>Version Link<input name="link" placeholder="Enter watermarked version link (e.g., abc123def456...)" required></label>
           <label>Method<select name="method" required><option value="" disabled selected>Select a method</option>${options}</select></label>
           <label>Position<input name="position" placeholder="Position"></label>
           <label>Key<input name="key" placeholder="Reader key" required></label>
@@ -268,11 +269,20 @@
         e.preventDefault();
         const fd = new FormData(e.currentTarget);
         const payload = Object.fromEntries(fd.entries());
+        const link = payload.link;
+        delete payload.link;
         try {
-          const r = await apiFetchJSON(`/api/read-watermark/${documentId}`, 'POST', payload);
+          const r = await apiFetchJSON(`/api/read-watermark-by-link/${encodeURIComponent(link)}`, 'POST', payload);
           if (!r.ok) throw new Error('HTTP ' + r.status);
           const data = await r.json();
-          openModal('Watermark data', `<pre class="pre">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`);
+          openModal('Watermark data', `
+            <div class="form-vertical">
+              <div><strong>Link:</strong> <code class="mono">${escapeHtml(data.link)}</code></div>
+              <div><strong>Method:</strong> ${escapeHtml(data.method)}</div>
+              <div><strong>Position:</strong> ${escapeHtml(data.position || 'N/A')}</div>
+              <div><strong>Secret:</strong> <pre class="pre">${escapeHtml(data.secret)}</pre></div>
+            </div>
+          `);        
         } catch(err){
           alert('Read failed: ' + err.message);
         }

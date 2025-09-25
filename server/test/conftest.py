@@ -43,9 +43,35 @@ def sample_pdf_bytes() -> bytes:
         b"<< /Size 4 /Root 1 0 R >>\n"
         b"startxref\n"
         b"202\n"
-        b"%%EOF\n"
+        b"%%EOF"
     )
 
+@pytest.fixture(scope="session")
+def pdf_without_eof() -> bytes:
+    """Minimal but valid PDF bytes for testing."""
+    return (
+        b"%PDF-1.4\n"
+        b"1 0 obj\n"
+        b"<< /Type /Catalog /Pages 2 0 R >>\n"
+        b"endobj\n"
+        b"2 0 obj\n"
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>\n"
+        b"endobj\n"
+        b"3 0 obj\n"
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\n"
+        b"endobj\n"
+        b"xref\n"
+        b"0 4\n"
+        b"0000000000 65535 f \n"
+        b"0000000009 00000 n \n"
+        b"0000000074 00000 n \n"
+        b"0000000120 00000 n \n"
+        b"trailer\n"
+        b"<< /Size 4 /Root 1 0 R >>\n"
+        b"startxref\n"
+        b"202\n"
+        # Note: no %%EOF marker
+    )
 
 @pytest.fixture(scope="session")
 def sample_pdf_file(temp_storage: Path, sample_pdf_bytes: bytes) -> Path:
@@ -89,13 +115,23 @@ def app(app_config: dict) -> Flask:
     # Set environment variables for the app
     for key, value in app_config.items():
         os.environ[key] = str(value)
+
+    with patch('sqlalchemy.create_engine') as mock_create_engine:
+        mock_conn = MagicMock()
+        mock_engine = MagicMock()
+        mock_create_engine.return_value = mock_engine
+        mock_engine.connect.return_value.__enter__.return_value = mock_conn
+        mock_engine.begin.return_value.__enter__.return_value = mock_conn
     
-    # Import and create app after setting env vars
-    from server.src.server import create_app
-    app = create_app()
-    app.config.update(app_config)
+        # Import and create app after setting env vars
+        from server.src.server import create_app
+        app = create_app()
+        app.config.update(app_config)
+
+        app.config['mock_db_engine'] = mock_engine
+        app.config['mock_db_conn'] = mock_conn
     
-    yield app
+        yield app
     
     # Cleanup
     for key in app_config.keys():

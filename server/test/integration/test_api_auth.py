@@ -14,9 +14,9 @@ from unittest.mock import patch, MagicMock
 @pytest.mark.integration
 class TestAuthenticationFlow:
     """Test the complete authentication flow."""
-    
+
     @pytest.mark.xfail
-    def test_create_user_success(self, client: FlaskClient):
+    def test_create_user_success(self, client: FlaskClient, app: Flask):
         """Test successful user creation."""
         user_data = {
             "email": "newuser@example.com",
@@ -24,28 +24,39 @@ class TestAuthenticationFlow:
             "password": "securepassword123"
         }
         
-        with patch('sqlalchemy.create_engine') as mock_create_engine:
-            # Mock database connection and operations
-            mock_conn = MagicMock()
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            mock_engine.begin.return_value.__enter__.return_value = mock_conn
-            
-            # Mock successful user creation
-            mock_result = MagicMock()
-            mock_result.lastrowid = 1
-            mock_conn.execute.side_effect = [
-                mock_result,  # INSERT result
-                MagicMock(id=1, email="newuser@example.com", login="newuser")  # SELECT result
-            ]
-            
-            response = client.post("/api/create-user", json=user_data)
-            
-            assert response.status_code == 201
-            data = response.get_json()
-            assert data["id"] == 1
-            assert data["email"] == "newuser@example.com"
-            assert data["login"] == "newuser"
+        mock_conn = app.config['mock_db_conn']
+  
+        # Mock successful user creation
+        mock_insert_result = MagicMock()
+        mock_insert_result.lastrowid = 1
+        
+        # 模拟 SELECT 语句的返回值 (ResultProxy)
+        mock_select_result = MagicMock()
+        
+        user_data_dict = {
+            "id": 1,
+            "email": "newuser@example.com",
+            "login": "newuser"
+        }
+        mock_user_row = MagicMock(**user_data_dict)
+        mock_user_row._asdict.return_value = user_data_dict # 确保它可以被序列化
+        
+        # 关键修正：让 .one() 方法返回我们伪造的用户数据
+        mock_select_result.one.return_value = mock_user_row
+        
+        # 3. 按顺序安排两次 execute 的返回值
+        mock_conn.execute.side_effect = [
+            mock_insert_result,  # 响应第一次 execute (INSERT)
+            mock_select_result   # 响应第二次 execute (SELECT)
+        ]
+        
+        response = client.post("/api/create-user", json=user_data)
+        
+        assert response.status_code == 201
+        data = response.get_json()
+        assert data["id"] == 1
+        assert data["email"] == "newuser@example.com"
+        assert data["login"] == "newuser"
     
     def test_create_user_missing_fields(self, client: FlaskClient):
         """Test user creation with missing required fields."""
