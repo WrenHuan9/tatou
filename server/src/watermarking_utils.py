@@ -29,9 +29,6 @@ To enable the richer exploration, install PyMuPDF:
 
 """
 from __future__ import annotations
-from PawStamp_watermark import TinyTextWatermark
-# from toy_bridge_eof import ToyBridgeEOF  # 不再需要的辅助类
-# from toy_comment import ToyComment       # 不再需要的辅助类
 import hashlib
 import re
 from typing import Any, Dict, Final, List
@@ -39,6 +36,8 @@ from typing import Any, Dict, Final, List
 from add_after_eof import AddAfterEOF
 from bash_bridge_append_eof import BashBridgeAppendEOF
 from metadata_watermark import MetadataWatermark
+from multi_location_watermark import MultiLocationWatermark
+from PawStamp_watermark import TinyTextWatermark
 from watermarking_method import PdfSource, WatermarkingMethod, load_pdf_bytes
 
 # --------------------
@@ -46,12 +45,11 @@ from watermarking_method import PdfSource, WatermarkingMethod, load_pdf_bytes
 # --------------------
 
 METHODS: Dict[str, WatermarkingMethod] = {
-    # "toy-bridge-eof": ToyBridgeEOF(),  # 隐藏辅助方法
-    # "toy-comment": ToyComment(),       # 隐藏辅助方法
     AddAfterEOF.name: AddAfterEOF(),
     BashBridgeAppendEOF.name: BashBridgeAppendEOF(),
-    TinyTextWatermark.name: TinyTextWatermark(),
-    MetadataWatermark.name: MetadataWatermark()
+    MetadataWatermark.name: MetadataWatermark(),
+    MultiLocationWatermark.name: MultiLocationWatermark(),
+    TinyTextWatermark.name: TinyTextWatermark()
 }
 """Registry of available watermarking methods.
 
