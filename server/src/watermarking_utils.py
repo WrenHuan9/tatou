@@ -36,6 +36,7 @@ from add_after_eof import AddAfterEOF
 from bash_bridge_append_eof import BashBridgeAppendEOF
 from watermarking_method import PdfSource, WatermarkingMethod, load_pdf_bytes
 from metadata_watermark import MetadataWatermark
+from multi_location_watermark import MultiLocationWatermark
 # --------------------
 # Method registry
 # --------------------
@@ -44,6 +45,7 @@ METHODS: Dict[str, WatermarkingMethod] = {
     AddAfterEOF.name: AddAfterEOF(),
     BashBridgeAppendEOF.name: BashBridgeAppendEOF(),
     MetadataWatermark.name: MetadataWatermark(),
+    MultiLocationWatermark.name: MultiLocationWatermark()
 }
 """Registry of available watermarking methods.
 
