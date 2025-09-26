@@ -1,3 +1,5 @@
+# watermarking_utils.py
+
 """watermarking_utils.py
 
 Utility functions and registry for PDF watermarking methods.
@@ -27,23 +29,29 @@ To enable the richer exploration, install PyMuPDF:
 
 """
 from __future__ import annotations
-
+from PawStamp_watermark import TinyTextWatermark
+# from toy_bridge_eof import ToyBridgeEOF  # 不再需要的辅助类
+# from toy_comment import ToyComment       # 不再需要的辅助类
 import hashlib
 import re
 from typing import Any, Dict, Final, List
 
 from add_after_eof import AddAfterEOF
 from bash_bridge_append_eof import BashBridgeAppendEOF
-from watermarking_method import PdfSource, WatermarkingMethod, load_pdf_bytes
 from metadata_watermark import MetadataWatermark
+from watermarking_method import PdfSource, WatermarkingMethod, load_pdf_bytes
+
 # --------------------
 # Method registry
 # --------------------
 
 METHODS: Dict[str, WatermarkingMethod] = {
+    # "toy-bridge-eof": ToyBridgeEOF(),  # 隐藏辅助方法
+    # "toy-comment": ToyComment(),       # 隐藏辅助方法
     AddAfterEOF.name: AddAfterEOF(),
     BashBridgeAppendEOF.name: BashBridgeAppendEOF(),
-    MetadataWatermark.name: MetadataWatermark(),
+    TinyTextWatermark.name: TinyTextWatermark(),
+    MetadataWatermark.name: MetadataWatermark()
 }
 """Registry of available watermarking methods.
 
@@ -95,8 +103,8 @@ def is_watermarking_applicable(
     method: str | WatermarkingMethod,
     pdf: PdfSource,
     position: str | None = None,
-) -> bool:
-    """Check if the watermarking method is applicable to the given PDF."""
+) -> bytes:
+    """Apply a watermark using the specified method and return new PDF bytes."""
     m = get_method(method)
     return m.is_watermark_applicable(pdf=pdf, position=position)
 
