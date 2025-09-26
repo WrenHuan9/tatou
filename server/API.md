@@ -18,7 +18,7 @@
 - [get-watermarking_methods](#get-watermarking-methods) — **GET** `/api/get-watermarking-methods`
 - [healthz](#healthz) — **GET** `/healthz`
 - [list-all-versions](#list-all-versions) — **GET** `/api/list-all-versions`
-- [list-pdf](#list-pdf) — **GET** `/api/list-documents`
+- [list-documents](#list-documents) — **GET** `/api/list-documents`
 - [list-versions](#list-versions)
   - **GET** `/api/list-versions/<int:document_id>`
   - **GET** `/api/list-versions`
@@ -474,4 +474,3 @@ should decrypt to:
 
 **Specification**
  * `get-version/<result>` SHOULD point to a watermarked version of a PDF specific to the group authenticated by the public key of the client.
-
