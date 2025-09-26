@@ -30,7 +30,24 @@ if not CASES:
 def sample_pdf_path(tmp_path_factory) -> Path:
     """Minimal but recognizable PDF bytes."""
     pdf = tmp_path_factory.mktemp("pdfs") / "sample.pdf"
-    pdf.write_bytes(b"%PDF-1.4\n" b"1 0 obj\n<< /Type /Catalog >>\nendobj\n" b"%%EOF\n")
+    pdf_content = (
+        b"%PDF-1.7\n"
+        b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+        b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>\nendobj\n"
+        b"3 0 obj\n<< /Type /Page /Parent 2 0 R >>\nendobj\n"
+        b"xref\n"
+        b"0 4\n"
+        b"0000000000 65535 f \n"
+        b"0000000010 00000 n \n"
+        b"0000000062 00000 n \n"
+        b"0000000140 00000 n \n"
+        b"trailer\n"
+        b"<< /Size 4 /Root 1 0 R >>\n"
+        b"startxref\n"
+        b"181\n"
+        b"%%EOF\n"
+    )
+    pdf.write_bytes(pdf_content)
     return pdf
 
 
