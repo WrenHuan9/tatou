@@ -1,7 +1,7 @@
 # PawStamp_watermark.py (最终改进版)
 
 import fitz
-from watermarking_method import WatermarkingMethod, load_pdf_bytes
+from watermarking_method import WatermarkingMethod, load_pdf_bytes, SecretNotFoundError
 import hashlib
 
 class TinyTextWatermark(WatermarkingMethod):
@@ -25,69 +25,95 @@ class TinyTextWatermark(WatermarkingMethod):
     def add_watermark(self, pdf, secret: str, key: str, position: str = "bottom-right", **kwargs) -> bytes:
         """
         将秘密信息作为微小文本嵌入到PDF的每一页。
+        现在直接存储原始秘密，而不是哈希值，以便能够正确验证。
         """
         # 转换输入为bytes格式
         pdf_bytes = load_pdf_bytes(pdf)
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
 
-        # 检查文档是否有页面
-        if doc.page_count == 0:
-            doc.close()
-            # 如果没有页面，返回原始文档
-            return pdf_bytes
+        try:
+            # 检查文档是否有页面
+            if doc.page_count == 0:
+                # 如果没有页面，返回原始文档
+                doc.close()
+                return pdf_bytes
 
-        # (改进2) 使用 key 来生成最终嵌入的秘密
-        secure_secret = self._get_secure_secret(secret, key)
-        watermark_text = f"TATOU_SECRET_START_{secure_secret}_END"
-        
-        text_color = (0.9, 0.9, 0.9)
-        font_size = 1
-
-        for page in doc:
-            textbox_position = fitz.Rect(
-                page.rect.width - 120,
-                page.rect.height - 20,
-                page.rect.width - 10,
-                page.rect.height - 10
-            )
+            # 直接使用原始秘密，而不是哈希值
+            # 为了安全，我们可以对秘密进行简单的编码，但仍然可以恢复
+            import base64
+            encoded_secret = base64.b64encode(secret.encode('utf-8')).decode('ascii')
+            watermark_text = f"TATOU_SECRET_START_{encoded_secret}_END"
             
-            # 使用内置字体，避免跨平台问题 (之前已做对)
-            page.insert_textbox(
-                textbox_position,
-                watermark_text,
-                fontsize=font_size,
-                color=text_color,
-                fontname="helv"
-            )
+            text_color = (0.9, 0.9, 0.9)
+            font_size = 1
 
-        return doc.tobytes()
+            for page in doc:
+                textbox_position = fitz.Rect(
+                    page.rect.width - 120,
+                    page.rect.height - 20,
+                    page.rect.width - 10,
+                    page.rect.height - 10
+                )
+                
+                # 使用内置字体，避免跨平台问题 (之前已做对)
+                page.insert_textbox(
+                    textbox_position,
+                    watermark_text,
+                    fontsize=font_size,
+                    color=text_color,
+                    fontname="helv"
+                )
+
+            result = doc.tobytes()
+            doc.close()
+            return result
+        except Exception as e:
+            doc.close()
+            raise
 
     # (修复1) 参数名从 pdf_bytes 改为 pdf
     def read_secret(self, pdf, key: str) -> str:
         """
         从带水印的PDF中提取出我们隐藏的秘密文本。
+        现在解码存储的base64编码的秘密并返回原始秘密。
         """
         # 转换输入为bytes格式
         pdf_bytes = load_pdf_bytes(pdf)
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         
-        for page in doc:
-            full_text = page.get_text("text")
-            
-            start_tag = "TATOU_SECRET_START_"
-            end_tag = "_END"
-            start_index = full_text.find(start_tag)
-            
-            if start_index != -1:
-                end_index = full_text.find(end_tag, start_index)
-                if end_index != -1:
-                    # (改进2) 在读取时，我们需要用同样的 secret 和 key 来验证
-                    # 注意：这个示例是验证，而不是直接读取原始 secret
-                    # 一个完整的系统会在这里返回原始的 secret
-                    extracted_secure_secret = full_text[start_index + len(start_tag):end_index]
-                    return extracted_secure_secret
+        try:
+            for page in doc:
+                full_text = page.get_text("text")
+                
+                start_tag = "TATOU_SECRET_START_"
+                end_tag = "_END"
+                start_index = full_text.find(start_tag)
+                
+                if start_index != -1:
+                    end_index = full_text.find(end_tag, start_index)
+                    if end_index != -1:
+                        # 提取存储的base64编码的秘密
+                        encoded_secret = full_text[start_index + len(start_tag):end_index]
+                        doc.close()
+                        
+                        try:
+                            # 解码base64编码的秘密
+                            import base64
+                            decoded_secret = base64.b64decode(encoded_secret).decode('utf-8')
+                            return decoded_secret
+                        except Exception as decode_error:
+                            raise SecretNotFoundError(f"Failed to decode secret: {str(decode_error)}")
 
-        return "No secret found with the PawStamp Secure method."
+            # 如果没有找到水印，抛出SecretNotFoundError异常而不是返回字符串
+            doc.close()
+            raise SecretNotFoundError("No secret found with the PawStamp Secure method.")
+        except Exception as e:
+            doc.close()
+            # 如果是SecretNotFoundError，直接重新抛出
+            if isinstance(e, SecretNotFoundError):
+                raise
+            # 其他异常转换为SecretNotFoundError
+            raise SecretNotFoundError(f"Error reading watermark: {str(e)}") from e
     
     # (修复1) 参数名从 pdf_bytes 改为 pdf
     def is_watermark_applicable(self, pdf, position: str | None = None, **kwargs) -> bool:
@@ -108,7 +134,7 @@ class TinyTextWatermark(WatermarkingMethod):
         """
         返回此水印方法的使用说明。
         """
-        return "Embeds a secret (salted with the key) as a tiny, nearly invisible text block. Returns a hash for verification."
+        return "Embeds a secret as a tiny, nearly invisible text block. The secret is base64-encoded for storage and can be fully recovered during reading."
     
     def remove_watermark(self, pdf, key: str, **kwargs) -> bytes:
         """当前方法无法真正去除水印，这里直接返回原文档。"""

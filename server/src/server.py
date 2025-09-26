@@ -886,7 +886,7 @@ def create_app():
             return _safe_error("Failed to read watermark from watermarked version", e, 400)
         
         if secret != row.secret:
-            return jsonify("Failed to read watermark from watermarked version"), 400
+            return jsonify({"error": "Failed to read watermark from watermarked version"}), 400
 
         return jsonify({
             "link": link,
