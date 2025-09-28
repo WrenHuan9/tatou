@@ -1,8 +1,10 @@
 # PawStamp_watermark.py (最终改进版)
 
 import fitz
-from watermarking_method import WatermarkingMethod, load_pdf_bytes, SecretNotFoundError
+from watermarking_method import WatermarkingMethod, load_pdf_bytes, SecretNotFoundError, InvalidKeyError
 import hashlib
+import hmac
+import base64
 
 class TinyTextWatermark(WatermarkingMethod):
     """
@@ -17,9 +19,15 @@ class TinyTextWatermark(WatermarkingMethod):
 
     def _get_secure_secret(self, secret: str, key: str) -> str:
         """一个简单的内部函数，使用 key 来让 secret 更独特"""
-        # 使用 key 作为“盐”，与 secret 结合后进行哈希，只取前16位作为演示
+        # 使用 key 作为"盐"，与 secret 结合后进行哈希，只取前16位作为演示
         salted_secret = secret + key
         return hashlib.sha1(salted_secret.encode()).hexdigest()[:16]
+    
+    def _generate_hmac(self, secret: str, key: str) -> str:
+        """生成HMAC签名用于验证"""
+        secret_bytes = secret.encode('utf-8')
+        hmac_obj = hmac.new(key.encode('utf-8'), secret_bytes, hashlib.sha256)
+        return hmac_obj.hexdigest()
 
     # (修复1) 参数名从 pdf_bytes 改为 pdf，以匹配框架调用
     def add_watermark(self, pdf, secret: str, key: str, position: str = "bottom-right", **kwargs) -> bytes:
@@ -38,11 +46,18 @@ class TinyTextWatermark(WatermarkingMethod):
                 doc.close()
                 return pdf_bytes
 
-            # 直接使用原始秘密，而不是哈希值
-            # 为了安全，我们可以对秘密进行简单的编码，但仍然可以恢复
-            import base64
-            encoded_secret = base64.b64encode(secret.encode('utf-8')).decode('ascii')
-            watermark_text = f"TATOU_SECRET_START_{encoded_secret}_END"
+            # 生成HMAC签名用于验证
+            hmac_signature = self._generate_hmac(secret, key)
+            
+            # 将秘密和HMAC签名一起编码存储
+            payload = {
+                "secret": secret,
+                "hmac": hmac_signature
+            }
+            import json
+            payload_json = json.dumps(payload)
+            encoded_payload = base64.b64encode(payload_json.encode('utf-8')).decode('ascii')
+            watermark_text = f"TATOU_SECRET_START_{encoded_payload}_END"
             
             text_color = (0.9, 0.9, 0.9)
             font_size = 1
@@ -92,17 +107,35 @@ class TinyTextWatermark(WatermarkingMethod):
                 if start_index != -1:
                     end_index = full_text.find(end_tag, start_index)
                     if end_index != -1:
-                        # 提取存储的base64编码的秘密
-                        encoded_secret = full_text[start_index + len(start_tag):end_index]
+                        # 提取存储的base64编码的载荷
+                        encoded_payload = full_text[start_index + len(start_tag):end_index]
                         doc.close()
                         
                         try:
-                            # 解码base64编码的秘密
-                            import base64
-                            decoded_secret = base64.b64decode(encoded_secret).decode('utf-8')
-                            return decoded_secret
-                        except Exception as decode_error:
-                            raise SecretNotFoundError(f"Failed to decode secret: {str(decode_error)}")
+                            # 解码base64编码的载荷
+                            payload_json = base64.b64decode(encoded_payload).decode('utf-8')
+                            import json
+                            payload = json.loads(payload_json)
+                            
+                            # 验证载荷格式
+                            if not isinstance(payload, dict) or "secret" not in payload or "hmac" not in payload:
+                                raise SecretNotFoundError("Invalid watermark payload format")
+                            
+                            secret = payload["secret"]
+                            stored_hmac = payload["hmac"]
+                            
+                            # 验证HMAC签名
+                            expected_hmac = self._generate_hmac(secret, key)
+                            if not hmac.compare_digest(stored_hmac, expected_hmac):
+                                raise InvalidKeyError("Invalid key, cannot verify the watermark")
+                            
+                            return secret
+                        except (json.JSONDecodeError, UnicodeDecodeError) as decode_error:
+                            raise SecretNotFoundError(f"Failed to decode watermark payload: {str(decode_error)}")
+                        except Exception as e:
+                            if isinstance(e, (SecretNotFoundError, InvalidKeyError)):
+                                raise
+                            raise SecretNotFoundError(f"Error processing watermark: {str(e)}")
 
             # 如果没有找到水印，抛出SecretNotFoundError异常而不是返回字符串
             doc.close()
@@ -134,7 +167,7 @@ class TinyTextWatermark(WatermarkingMethod):
         """
         返回此水印方法的使用说明。
         """
-        return "Embeds a secret as a tiny, nearly invisible text block. The secret is base64-encoded for storage and can be fully recovered during reading."
+        return "Embeds a secret as a tiny, nearly invisible text block. The secret is protected with HMAC verification using the provided key."
     
     def remove_watermark(self, pdf, key: str, **kwargs) -> bytes:
         """当前方法无法真正去除水印，这里直接返回原文档。"""

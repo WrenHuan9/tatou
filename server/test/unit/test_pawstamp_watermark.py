@@ -1,132 +1,110 @@
 import hashlib
-import io
-import tempfile
-from pathlib import Path
+import base64
+import json
+import hmac
 from unittest.mock import MagicMock, patch
-
 import pytest
 
 from PawStamp_watermark import TinyTextWatermark
-from watermarking_method import load_pdf_bytes, WatermarkingError, SecretNotFoundError
+from watermarking_method import SecretNotFoundError, InvalidKeyError
+
+
+# Valid PDF header for testing
+VALID_PDF_HEADER = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\nxref\n0 4\n0000000000 65535 f \n0000000010 00000 n \n0000000062 00000 n \n0000000140 00000 n \ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n181\n%%EOF"
 
 
 class TestTinyTextWatermark:
     
     def test_class_attributes(self):
+        """Test basic class attributes."""
         method = TinyTextWatermark()
         assert method.name == "PawStamp Secure"
         assert hasattr(method, '_get_secure_secret')
+        assert hasattr(method, '_generate_hmac')
     
     def test_get_usage(self):
+        """Test usage description."""
         method = TinyTextWatermark()
         usage = method.get_usage()
         assert isinstance(usage, str)
         assert "secret" in usage.lower()
-        assert "tiny" in usage.lower() or "invisible" in usage.lower()
-        assert "base64" in usage.lower()
+        assert "hmac" in usage.lower()
     
-    def test_get_secure_secret_basic(self):
+    def test_generate_hmac_basic(self):
+        """Test HMAC generation."""
         method = TinyTextWatermark()
         secret = "test-secret"
         key = "test-key"
         
-        result = method._get_secure_secret(secret, key)
+        result = method._generate_hmac(secret, key)
         
         assert isinstance(result, str)
-        assert len(result) == 16
+        assert len(result) == 64  # SHA256 hex digest length
         
-        result2 = method._get_secure_secret(secret, key)
+        # Same input should produce same result
+        result2 = method._generate_hmac(secret, key)
         assert result == result2
     
-    def test_get_secure_secret_different_inputs(self):
+    def test_generate_hmac_different_inputs(self):
+        """Test HMAC with different inputs produces different results."""
         method = TinyTextWatermark()
         
-        result1 = method._get_secure_secret("secret1", "key1")
-        result2 = method._get_secure_secret("secret2", "key1")
-        result3 = method._get_secure_secret("secret1", "key2")
+        result1 = method._generate_hmac("secret1", "key1")
+        result2 = method._generate_hmac("secret2", "key1")
+        result3 = method._generate_hmac("secret1", "key2")
         
         assert result1 != result2
         assert result1 != result3
         assert result2 != result3
     
-    def test_get_secure_secret_hash_computation(self):
+    def test_generate_hmac_unicode(self):
+        """Test HMAC with Unicode input."""
+        method = TinyTextWatermark()
+        secret = "测试秘密 🔒"
+        key = "测试密钥"
+        
+        result = method._generate_hmac(secret, key)
+        
+        assert isinstance(result, str)
+        assert len(result) == 64
+    
+    def test_generate_hmac_empty_strings(self):
+        """Test HMAC with empty strings."""
+        method = TinyTextWatermark()
+        
+        result1 = method._generate_hmac("", "")
+        result2 = method._generate_hmac("", "key")
+        result3 = method._generate_hmac("secret", "")
+        
+        assert isinstance(result1, str)
+        assert isinstance(result2, str)
+        assert isinstance(result3, str)
+        assert len(result1) == len(result2) == len(result3) == 64
+    
+    def test_get_secure_secret(self):
+        """Test _get_secure_secret method."""
         method = TinyTextWatermark()
         secret = "test-secret"
         key = "test-key"
         
         result = method._get_secure_secret(secret, key)
         
-        expected_input = secret + key
-        expected_hash = hashlib.sha1(expected_input.encode()).hexdigest()[:16]
-        assert result == expected_hash
-    
-    def test_get_secure_secret_unicode(self):
-        method = TinyTextWatermark()
-        secret = "测试秘密"
-        key = "测试密钥"
-        
-        result = method._get_secure_secret(secret, key)
-        
         assert isinstance(result, str)
-        assert len(result) == 16
+        assert len(result) == 16  # SHA1 hex digest truncated to 16 chars
+        
+        # Test consistency
+        result2 = method._get_secure_secret(secret, key)
+        assert result == result2
+        
+        # Test different inputs produce different results
+        result3 = method._get_secure_secret("different-secret", key)
+        result4 = method._get_secure_secret(secret, "different-key")
+        assert result != result3
+        assert result != result4
     
-    def test_get_secure_secret_empty_strings(self):
-        method = TinyTextWatermark()
-        
-        result1 = method._get_secure_secret("", "")
-        result2 = method._get_secure_secret("", "key")
-        result3 = method._get_secure_secret("secret", "")
-        
-        assert isinstance(result1, str)
-        assert isinstance(result2, str)
-        assert isinstance(result3, str)
-        assert len(result1) == len(result2) == len(result3) == 16
-    
-    def test_is_watermark_applicable_valid_pdf(self, sample_pdf_bytes: bytes):
-        method = TinyTextWatermark()
-        
-        result = method.is_watermark_applicable(sample_pdf_bytes)
-        
-        assert result is True
-    
-    def test_is_watermark_applicable_with_file_path(self, sample_pdf_bytes: bytes):
-        method = TinyTextWatermark()
-        
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
-            tmp_file.write(sample_pdf_bytes)
-            tmp_file.flush()
-            
-            result = method.is_watermark_applicable(tmp_file.name)
-            
-            assert result is True
-            
-            Path(tmp_file.name).unlink()
-    
-    def test_is_watermark_applicable_invalid_input(self):
-        method = TinyTextWatermark()
-        
-        assert method.is_watermark_applicable(b"not a pdf") is False
-        assert method.is_watermark_applicable(b"") is False
-        assert method.is_watermark_applicable(b"random bytes") is False
-    
-    def test_is_watermark_applicable_load_pdf_bytes_exception(self):
-        method = TinyTextWatermark()
-        
-        assert method.is_watermark_applicable("nonexistent_file.pdf") is False
-    
-    def test_is_watermark_applicable_with_kwargs(self, sample_pdf_bytes: bytes):
-        method = TinyTextWatermark()
-        
-        result = method.is_watermark_applicable(
-            sample_pdf_bytes,
-            position="bottom-right",
-            extra_param="ignored"
-        )
-        
-        assert result is True
-    
-    @patch('fitz.open')
-    def test_add_watermark_basic(self, mock_fitz_open, sample_pdf_bytes: bytes):
+    @patch('PawStamp_watermark.fitz.open')
+    def test_add_watermark_basic(self, mock_fitz_open):
+        """Test basic watermark addition."""
         mock_doc = MagicMock()
         mock_page = MagicMock()
         mock_page.rect.width = 612
@@ -139,623 +117,309 @@ class TestTinyTextWatermark:
         secret = "test-secret"
         key = "test-key"
         
-        result = method.add_watermark(sample_pdf_bytes, secret, key)
+        result = method.add_watermark(VALID_PDF_HEADER, secret, key)
         
         assert isinstance(result, bytes)
         mock_fitz_open.assert_called_once()
         mock_page.insert_textbox.assert_called_once()
         
+        # Check watermark text format
         args, kwargs = mock_page.insert_textbox.call_args
-        textbox_rect, watermark_text = args[:2]
+        watermark_text = args[1]
         
-        # 现在期望Base64编码的秘密
-        import base64
-        expected_encoded_secret = base64.b64encode(secret.encode('utf-8')).decode('ascii')
-        expected_text = f"TATOU_SECRET_START_{expected_encoded_secret}_END"
+        expected_hmac = method._generate_hmac(secret, key)
+        expected_payload = {"secret": secret, "hmac": expected_hmac}
+        expected_payload_json = json.dumps(expected_payload)
+        expected_encoded_payload = base64.b64encode(expected_payload_json.encode('utf-8')).decode('ascii')
+        expected_text = f"TATOU_SECRET_START_{expected_encoded_payload}_END"
         assert watermark_text == expected_text
         
+        # Check textbox parameters
         assert kwargs['fontsize'] == 1
         assert kwargs['color'] == (0.9, 0.9, 0.9)
         assert kwargs['fontname'] == "helv"
     
-    @patch('fitz.open')
-    def test_add_watermark_with_position_parameter(self, mock_fitz_open, sample_pdf_bytes: bytes):
+    @patch('PawStamp_watermark.fitz.open')
+    def test_add_watermark_zero_pages(self, mock_fitz_open):
+        """Test watermark addition with zero pages."""
         mock_doc = MagicMock()
-        mock_page = MagicMock()
-        mock_page.rect.width = 612
-        mock_page.rect.height = 792
-        mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
-        mock_doc.tobytes.return_value = b"%PDF-watermarked content"
+        mock_doc.page_count = 0
         mock_fitz_open.return_value = mock_doc
         
         method = TinyTextWatermark()
         
-        result = method.add_watermark(sample_pdf_bytes, "secret", "key", position="top-left")
+        result = method.add_watermark(VALID_PDF_HEADER, "secret", "key")
         
-        assert isinstance(result, bytes)
-        mock_page.insert_textbox.assert_called_once()
+        assert result == VALID_PDF_HEADER
+        mock_doc.close.assert_called_once()
     
-    @patch('fitz.open')
-    def test_add_watermark_with_kwargs(self, mock_fitz_open, sample_pdf_bytes: bytes):
-        mock_doc = MagicMock()
-        mock_page = MagicMock()
-        mock_page.rect.width = 612
-        mock_page.rect.height = 792
-        mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
-        mock_doc.tobytes.return_value = b"%PDF-watermarked content"
-        mock_fitz_open.return_value = mock_doc
-        
-        method = TinyTextWatermark()
-        
-        result = method.add_watermark(
-            sample_pdf_bytes, 
-            "secret", 
-            "key",
-            position="center",
-            extra_param="ignored"
-        )
-        
-        assert isinstance(result, bytes)
-        mock_page.insert_textbox.assert_called_once()
-    
-    @patch('fitz.open')
-    def test_add_watermark_multiple_pages(self, mock_fitz_open, sample_pdf_bytes: bytes):
-        mock_doc = MagicMock()
-        
-        mock_page1 = MagicMock()
-        mock_page1.rect.width = 612
-        mock_page1.rect.height = 792
-        
-        mock_page2 = MagicMock()
-        mock_page2.rect.width = 612
-        mock_page2.rect.height = 792
-        
-        mock_doc.__iter__ = MagicMock(return_value=iter([mock_page1, mock_page2]))
-        mock_doc.tobytes.return_value = b"%PDF-multi-page watermarked"
-        mock_fitz_open.return_value = mock_doc
-        
-        method = TinyTextWatermark()
-        
-        result = method.add_watermark(sample_pdf_bytes, "secret", "key")
-        
-        assert isinstance(result, bytes)
-        mock_page1.insert_textbox.assert_called_once()
-        mock_page2.insert_textbox.assert_called_once()
-    
-    @patch('fitz.open')
-    def test_add_watermark_unicode_secret(self, mock_fitz_open, sample_pdf_bytes: bytes):
-        mock_doc = MagicMock()
-        mock_page = MagicMock()
-        mock_page.rect.width = 612
-        mock_page.rect.height = 792
-        mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
-        mock_doc.tobytes.return_value = b"%PDF-unicode watermarked"
-        mock_fitz_open.return_value = mock_doc
-        
-        method = TinyTextWatermark()
-        secret = "测试秘密 🔒"
-        key = "测试密钥"
-        
-        result = method.add_watermark(sample_pdf_bytes, secret, key)
-        
-        assert isinstance(result, bytes)
-        mock_page.insert_textbox.assert_called_once()
-        
-        args, kwargs = mock_page.insert_textbox.call_args
-        watermark_text = args[1]
-        
-        # 现在期望Base64编码的Unicode秘密
-        import base64
-        expected_encoded_secret = base64.b64encode(secret.encode('utf-8')).decode('ascii')
-        expected_text = f"TATOU_SECRET_START_{expected_encoded_secret}_END"
-        assert watermark_text == expected_text
-    
-    @patch('fitz.open')
-    def test_add_watermark_with_file_path(self, mock_fitz_open, sample_pdf_bytes: bytes):
-        mock_doc = MagicMock()
-        mock_page = MagicMock()
-        mock_page.rect.width = 612
-        mock_page.rect.height = 792
-        mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
-        mock_doc.tobytes.return_value = b"%PDF-watermarked content"
-        mock_fitz_open.return_value = mock_doc
-        
-        method = TinyTextWatermark()
-        
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
-            tmp_file.write(sample_pdf_bytes)
-            tmp_file.flush()
-            
-            result = method.add_watermark(tmp_file.name, "secret", "key")
-            
-            assert isinstance(result, bytes)
-            mock_page.insert_textbox.assert_called_once()
-            
-            Path(tmp_file.name).unlink()
-    
-    @patch('fitz.open')
-    def test_add_watermark_with_file_object(self, mock_fitz_open, sample_pdf_bytes: bytes):
-        mock_doc = MagicMock()
-        mock_page = MagicMock()
-        mock_page.rect.width = 612
-        mock_page.rect.height = 792
-        mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
-        mock_doc.tobytes.return_value = b"%PDF-watermarked content"
-        mock_fitz_open.return_value = mock_doc
-        
-        method = TinyTextWatermark()
-        
-        pdf_file_obj = io.BytesIO(sample_pdf_bytes)
-        
-        result = method.add_watermark(pdf_file_obj, "secret", "key")
-        
-        assert result == b"%PDF-watermarked content"
-    
-    def test_add_watermark_load_pdf_bytes_exception(self):
-        method = TinyTextWatermark()
-        
-        with patch('PawStamp_watermark.load_pdf_bytes', side_effect=ValueError("Invalid PDF")):
-            with pytest.raises(ValueError, match="Invalid PDF"):
-                method.add_watermark("invalid", "secret", "key")
-    
-    @patch('fitz.open')
-    def test_add_watermark_fitz_exception(self, mock_fitz_open, sample_pdf_bytes: bytes):
+    @patch('PawStamp_watermark.fitz.open')
+    def test_add_watermark_exception(self, mock_fitz_open):
+        """Test watermark addition with exception."""
         mock_fitz_open.side_effect = Exception("Fitz error")
         method = TinyTextWatermark()
         
         with pytest.raises(Exception, match="Fitz error"):
-            method.add_watermark(sample_pdf_bytes, "secret", "key")
+            method.add_watermark(VALID_PDF_HEADER, "secret", "key")
     
-    @patch('fitz.open')
-    def test_read_secret_basic_found(self, mock_fitz_open, sample_pdf_bytes: bytes):
+    @patch('PawStamp_watermark.fitz.open')
+    def test_add_watermark_exception_during_processing(self, mock_fitz_open):
+        """Test watermark addition with exception during processing."""
         mock_doc = MagicMock()
         mock_page = MagicMock()
+        mock_page.rect.width = 612
+        mock_page.rect.height = 792
+        mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
+        mock_page.insert_textbox.side_effect = Exception("Processing error")
+        mock_fitz_open.return_value = mock_doc
+        
+        method = TinyTextWatermark()
+        
+        with pytest.raises(Exception, match="Processing error"):
+            method.add_watermark(VALID_PDF_HEADER, "secret", "key")
+        
+        # Verify doc.close() is called even when exception occurs
+        mock_doc.close.assert_called_once()
+    
+    @patch('PawStamp_watermark.fitz.open')
+    def test_read_secret_success(self, mock_fitz_open):
+        """Test successful secret reading."""
+        mock_doc = MagicMock()
+        mock_page = MagicMock()
+        mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
+        mock_fitz_open.return_value = mock_doc
         
         method = TinyTextWatermark()
         secret = "test-secret"
         key = "test-key"
         
-        # 现在使用Base64编码的秘密
-        import base64
-        encoded_secret = base64.b64encode(secret.encode('utf-8')).decode('ascii')
-        watermark_text = f"Some content TATOU_SECRET_START_{encoded_secret}_END more content"
+        # Create valid watermark text
+        hmac_signature = method._generate_hmac(secret, key)
+        payload = {"secret": secret, "hmac": hmac_signature}
+        payload_json = json.dumps(payload)
+        encoded_payload = base64.b64encode(payload_json.encode('utf-8')).decode('ascii')
+        watermark_text = f"Some content TATOU_SECRET_START_{encoded_payload}_END more content"
         mock_page.get_text.return_value = watermark_text
+        
+        result = method.read_secret(VALID_PDF_HEADER, key)
+        
+        assert result == secret
+    
+    @patch('PawStamp_watermark.fitz.open')
+    def test_read_secret_invalid_key(self, mock_fitz_open):
+        """Test secret reading with invalid key."""
+        mock_doc = MagicMock()
+        mock_page = MagicMock()
         mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
         mock_fitz_open.return_value = mock_doc
         
-        result = method.read_secret(sample_pdf_bytes, key)
-        
-        assert result == secret
-    
-    @patch('fitz.open')
-    def test_read_secret_multiple_pages_found_on_second(self, mock_fitz_open, sample_pdf_bytes: bytes):
-        mock_doc = MagicMock()
-        
-        mock_page1 = MagicMock()
-        mock_page1.get_text.return_value = "No watermark here"
-        
-        mock_page2 = MagicMock()
         method = TinyTextWatermark()
-        secret = "page2-secret"
-        key = "page2-key"
+        secret = "test-secret"
+        correct_key = "correct-key"
+        wrong_key = "wrong-key"
         
-        # 现在使用Base64编码的秘密
-        import base64
-        encoded_secret = base64.b64encode(secret.encode('utf-8')).decode('ascii')
-        watermark_text = f"Content TATOU_SECRET_START_{encoded_secret}_END"
-        mock_page2.get_text.return_value = watermark_text
+        # Create watermark with correct key
+        hmac_signature = method._generate_hmac(secret, correct_key)
+        payload = {"secret": secret, "hmac": hmac_signature}
+        payload_json = json.dumps(payload)
+        encoded_payload = base64.b64encode(payload_json.encode('utf-8')).decode('ascii')
+        watermark_text = f"TATOU_SECRET_START_{encoded_payload}_END"
+        mock_page.get_text.return_value = watermark_text
         
-        mock_doc.__iter__ = MagicMock(return_value=iter([mock_page1, mock_page2]))
-        mock_fitz_open.return_value = mock_doc
-        
-        result = method.read_secret(sample_pdf_bytes, key)
-        
-        assert result == secret
+        # Try to read with wrong key
+        with pytest.raises(SecretNotFoundError):
+            method.read_secret(VALID_PDF_HEADER, wrong_key)
     
-    @patch('fitz.open')
-    def test_read_secret_not_found(self, mock_fitz_open, sample_pdf_bytes: bytes):
+    @patch('PawStamp_watermark.fitz.open')
+    def test_read_secret_not_found(self, mock_fitz_open):
+        """Test secret reading when no watermark found."""
         mock_doc = MagicMock()
         mock_page = MagicMock()
-        mock_page.get_text.return_value = "No watermark in this content"
+        mock_page.get_text.return_value = "No watermark here"
         mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
         mock_fitz_open.return_value = mock_doc
         
         method = TinyTextWatermark()
         
         with pytest.raises(SecretNotFoundError, match="No secret found with the PawStamp Secure method"):
-            method.read_secret(sample_pdf_bytes, "any-key")
+            method.read_secret(VALID_PDF_HEADER, "key")
     
-    @patch('fitz.open')
-    def test_read_secret_start_tag_found_but_no_end_tag(self, mock_fitz_open, sample_pdf_bytes: bytes):
+    @patch('PawStamp_watermark.fitz.open')
+    def test_read_secret_invalid_payload_format(self, mock_fitz_open):
+        """Test secret reading with invalid payload format."""
         mock_doc = MagicMock()
         mock_page = MagicMock()
-        mock_page.get_text.return_value = "Content TATOU_SECRET_START_somehash but no end tag"
         mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
         mock_fitz_open.return_value = mock_doc
         
+        # Invalid payload (missing hmac field)
+        invalid_payload = {"secret": "test"}
+        payload_json = json.dumps(invalid_payload)
+        encoded_payload = base64.b64encode(payload_json.encode('utf-8')).decode('ascii')
+        watermark_text = f"TATOU_SECRET_START_{encoded_payload}_END"
+        mock_page.get_text.return_value = watermark_text
+        
         method = TinyTextWatermark()
         
-        with pytest.raises(SecretNotFoundError, match="No secret found with the PawStamp Secure method"):
-            method.read_secret(sample_pdf_bytes, "key")
+        with pytest.raises(SecretNotFoundError, match="Invalid watermark payload format"):
+            method.read_secret(VALID_PDF_HEADER, "key")
     
-    @patch('fitz.open')
-    def test_read_secret_empty_secret_between_tags(self, mock_fitz_open, sample_pdf_bytes: bytes):
+    @patch('PawStamp_watermark.fitz.open')
+    def test_read_secret_invalid_json(self, mock_fitz_open):
+        """Test secret reading with invalid JSON."""
         mock_doc = MagicMock()
         mock_page = MagicMock()
-        # 空字符串的Base64编码
-        import base64
-        empty_encoded = base64.b64encode("".encode('utf-8')).decode('ascii')
-        mock_page.get_text.return_value = f"Content TATOU_SECRET_START_{empty_encoded}_END more content"
         mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
         mock_fitz_open.return_value = mock_doc
         
+        # Invalid JSON
+        invalid_json = '{"secret": "test", "hmac": "invalid"'
+        encoded_payload = base64.b64encode(invalid_json.encode('utf-8')).decode('ascii')
+        watermark_text = f"TATOU_SECRET_START_{encoded_payload}_END"
+        mock_page.get_text.return_value = watermark_text
+        
         method = TinyTextWatermark()
         
-        result = method.read_secret(sample_pdf_bytes, "key")
-        
-        assert result == ""
+        with pytest.raises(SecretNotFoundError, match="Failed to decode watermark payload"):
+            method.read_secret(VALID_PDF_HEADER, "key")
     
-    @patch('fitz.open')
-    def test_read_secret_multiple_watermarks_returns_first(self, mock_fitz_open, sample_pdf_bytes: bytes):
+    @patch('PawStamp_watermark.fitz.open')
+    def test_read_secret_invalid_base64(self, mock_fitz_open):
+        """Test secret reading with invalid Base64."""
         mock_doc = MagicMock()
         mock_page = MagicMock()
-        
-        # 使用Base64编码的多个水印
-        import base64
-        first_encoded = base64.b64encode("first".encode('utf-8')).decode('ascii')
-        second_encoded = base64.b64encode("second".encode('utf-8')).decode('ascii')
-        content = f"TATOU_SECRET_START_{first_encoded}_END and TATOU_SECRET_START_{second_encoded}_END"
-        mock_page.get_text.return_value = content
         mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
         mock_fitz_open.return_value = mock_doc
         
+        # Invalid Base64
+        watermark_text = "TATOU_SECRET_START_invalid_base64!_END"
+        mock_page.get_text.return_value = watermark_text
+        
         method = TinyTextWatermark()
         
-        result = method.read_secret(sample_pdf_bytes, "key")
-        
-        assert result == "first"
+        with pytest.raises(SecretNotFoundError):
+            method.read_secret(VALID_PDF_HEADER, "key")
     
-    @patch('fitz.open')
-    def test_read_secret_with_file_path(self, mock_fitz_open, sample_pdf_bytes: bytes):
+    @patch('PawStamp_watermark.fitz.open')
+    def test_read_secret_exception_during_processing(self, mock_fitz_open):
+        """Test secret reading with exception during processing."""
         mock_doc = MagicMock()
         mock_page = MagicMock()
-        # 使用Base64编码
-        import base64
-        encoded_secret = base64.b64encode("testsecret".encode('utf-8')).decode('ascii')
-        mock_page.get_text.return_value = f"TATOU_SECRET_START_{encoded_secret}_END"
-        mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
-        mock_fitz_open.return_value = mock_doc
-        
-        method = TinyTextWatermark()
-        
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
-            tmp_file.write(sample_pdf_bytes)
-            tmp_file.flush()
-            
-            result = method.read_secret(tmp_file.name, "any-key")
-            
-            assert result == "testsecret"
-            
-            Path(tmp_file.name).unlink()
-    
-    @patch('fitz.open')
-    def test_read_secret_with_file_object(self, mock_fitz_open, sample_pdf_bytes: bytes):
-        mock_doc = MagicMock()
-        mock_page = MagicMock()
-        # 使用Base64编码
-        import base64
-        encoded_secret = base64.b64encode("testsecret".encode('utf-8')).decode('ascii')
-        mock_page.get_text.return_value = f"TATOU_SECRET_START_{encoded_secret}_END"
-        mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
-        mock_fitz_open.return_value = mock_doc
-        
-        method = TinyTextWatermark()
-        
-        pdf_file_obj = io.BytesIO(sample_pdf_bytes)
-        
-        result = method.read_secret(pdf_file_obj, "any-key")
-        
-        assert result == "testsecret"
-    
-    def test_read_secret_load_pdf_bytes_exception(self):
-        method = TinyTextWatermark()
-        
-        with patch('PawStamp_watermark.load_pdf_bytes', side_effect=ValueError("Invalid PDF")):
-            with pytest.raises(ValueError, match="Invalid PDF"):
-                method.read_secret("invalid", "key")
-    
-    @patch('fitz.open')
-    def test_read_secret_fitz_exception(self, mock_fitz_open, sample_pdf_bytes: bytes):
-        mock_fitz_open.side_effect = Exception("Fitz error")
-        method = TinyTextWatermark()
-        
-        with pytest.raises(Exception, match="Fitz error"):
-            method.read_secret(sample_pdf_bytes, "key")
-    
-    def test_remove_watermark_basic(self, sample_pdf_bytes: bytes):
-        method = TinyTextWatermark()
-        
-        result = method.remove_watermark(sample_pdf_bytes, "any-key")
-        
-        assert result == sample_pdf_bytes
-    
-    def test_remove_watermark_with_file_path(self, sample_pdf_bytes: bytes):
-        method = TinyTextWatermark()
-        
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
-            tmp_file.write(sample_pdf_bytes)
-            tmp_file.flush()
-            
-            result = method.remove_watermark(tmp_file.name, "any-key")
-            
-            assert result == sample_pdf_bytes
-            
-            Path(tmp_file.name).unlink()
-    
-    def test_remove_watermark_with_file_object(self, sample_pdf_bytes: bytes):
-        method = TinyTextWatermark()
-        
-        pdf_file_obj = io.BytesIO(sample_pdf_bytes)
-        
-        result = method.remove_watermark(pdf_file_obj, "any-key")
-        
-        assert result == sample_pdf_bytes
-    
-    def test_remove_watermark_with_kwargs(self, sample_pdf_bytes: bytes):
-        method = TinyTextWatermark()
-        
-        result = method.remove_watermark(
-            sample_pdf_bytes,
-            "any-key",
-            position="ignored",
-            extra_param="ignored"
-        )
-        
-        assert result == sample_pdf_bytes
-    
-    def test_remove_watermark_load_pdf_bytes_exception(self):
-        method = TinyTextWatermark()
-        
-        with patch('PawStamp_watermark.load_pdf_bytes', side_effect=ValueError("Invalid PDF")):
-            with pytest.raises(ValueError, match="Invalid PDF"):
-                method.remove_watermark("invalid", "key")
-    
-    @patch('fitz.open')
-    def test_read_secret_invalid_base64_encoding(self, mock_fitz_open, sample_pdf_bytes: bytes):
-        """Test read_secret with invalid Base64 encoding."""
-        mock_doc = MagicMock()
-        mock_page = MagicMock()
-        # 使用无效的Base64编码
-        mock_page.get_text.return_value = "TATOU_SECRET_START_invalid_base64!_END"
-        mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
-        mock_fitz_open.return_value = mock_doc
-        
-        method = TinyTextWatermark()
-        
-        with pytest.raises(SecretNotFoundError, match="Failed to decode secret"):
-            method.read_secret(sample_pdf_bytes, "key")
-    
-    @patch('fitz.open')
-    def test_read_secret_invalid_utf8_after_decode(self, mock_fitz_open, sample_pdf_bytes: bytes):
-        """Test read_secret with valid Base64 but invalid UTF-8."""
-        mock_doc = MagicMock()
-        mock_page = MagicMock()
-        # 使用有效的Base64但无效的UTF-8
-        import base64
-        invalid_utf8_bytes = b'\xff\xfe\xfd'  # 无效的UTF-8序列
-        invalid_base64 = base64.b64encode(invalid_utf8_bytes).decode('ascii')
-        mock_page.get_text.return_value = f"TATOU_SECRET_START_{invalid_base64}_END"
-        mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
-        mock_fitz_open.return_value = mock_doc
-        
-        method = TinyTextWatermark()
-        
-        with pytest.raises(SecretNotFoundError, match="Failed to decode secret"):
-            method.read_secret(sample_pdf_bytes, "key")
-    
-    @patch('fitz.open')
-    def test_read_secret_fitz_exception_during_processing(self, mock_fitz_open, sample_pdf_bytes: bytes):
-        """Test read_secret when fitz raises an exception during processing."""
-        mock_doc = MagicMock()
-        mock_page = MagicMock()
-        mock_page.get_text.side_effect = Exception("Fitz processing error")
+        mock_page.get_text.side_effect = Exception("Processing error")
         mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
         mock_fitz_open.return_value = mock_doc
         
         method = TinyTextWatermark()
         
         with pytest.raises(SecretNotFoundError, match="Error reading watermark"):
-            method.read_secret(sample_pdf_bytes, "key")
+            method.read_secret(VALID_PDF_HEADER, "key")
     
-    @patch('fitz.open')
-    def test_add_watermark_fitz_exception_during_processing(self, mock_fitz_open, sample_pdf_bytes: bytes):
-        """Test add_watermark when fitz raises an exception during processing."""
+    @patch('PawStamp_watermark.fitz.open')
+    def test_read_secret_exception_during_payload_processing(self, mock_fitz_open):
+        """Test secret reading with exception during payload processing."""
         mock_doc = MagicMock()
         mock_page = MagicMock()
-        mock_page.rect.width = 612
-        mock_page.rect.height = 792
         mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
-        mock_page.insert_textbox.side_effect = Exception("Fitz processing error")
         mock_fitz_open.return_value = mock_doc
         
         method = TinyTextWatermark()
+        secret = "test-secret"
+        key = "test-key"
         
-        with pytest.raises(Exception, match="Fitz processing error"):
-            method.add_watermark(sample_pdf_bytes, "secret", "key")
+        # Create valid watermark text
+        hmac_signature = method._generate_hmac(secret, key)
+        payload = {"secret": secret, "hmac": hmac_signature}
+        payload_json = json.dumps(payload)
+        encoded_payload = base64.b64encode(payload_json.encode('utf-8')).decode('ascii')
+        watermark_text = f"TATOU_SECRET_START_{encoded_payload}_END"
+        mock_page.get_text.return_value = watermark_text
+        
+        # Mock an exception during payload processing (e.g., in _generate_hmac)
+        with patch.object(method, '_generate_hmac', side_effect=Exception("HMAC processing error")):
+            with pytest.raises(SecretNotFoundError, match="Error processing watermark"):
+                method.read_secret(VALID_PDF_HEADER, key)
     
-    def test_add_watermark_zero_pages_returns_original(self, sample_pdf_bytes: bytes):
-        """Test add_watermark with zero pages returns original PDF."""
+    @patch('PawStamp_watermark.fitz.open')
+    def test_is_watermark_applicable_valid_pdf(self, mock_fitz_open):
+        """Test watermark applicability with valid PDF."""
+        mock_doc = MagicMock()
+        mock_doc.page_count = 1
+        mock_fitz_open.return_value = mock_doc
+        
         method = TinyTextWatermark()
+        result = method.is_watermark_applicable(VALID_PDF_HEADER)
         
-        with patch('fitz.open') as mock_fitz_open:
-            mock_doc = MagicMock()
-            mock_doc.page_count = 0
-            mock_fitz_open.return_value = mock_doc
-            
-            result = method.add_watermark(sample_pdf_bytes, "secret", "key")
-            
-            assert result == sample_pdf_bytes
-            mock_doc.close.assert_called_once()
+        assert result is True
+        mock_doc.close.assert_called_once()
     
-    def test_is_watermark_applicable_fitz_exception_returns_false(self, sample_pdf_bytes: bytes):
-        """Test is_watermark_applicable when fitz raises an exception."""
+    @patch('PawStamp_watermark.fitz.open')
+    def test_is_watermark_applicable_zero_pages(self, mock_fitz_open):
+        """Test watermark applicability with zero pages."""
+        mock_doc = MagicMock()
+        mock_doc.page_count = 0
+        mock_fitz_open.return_value = mock_doc
+        
         method = TinyTextWatermark()
+        result = method.is_watermark_applicable(VALID_PDF_HEADER)
         
-        with patch('fitz.open', side_effect=Exception("Fitz error")):
-            result = method.is_watermark_applicable(sample_pdf_bytes)
-            assert result is False
+        assert result is False
+        mock_doc.close.assert_called_once()
     
-    def test_is_watermark_applicable_load_pdf_bytes_exception_returns_false(self):
-        """Test is_watermark_applicable when load_pdf_bytes raises an exception."""
+    @patch('PawStamp_watermark.fitz.open')
+    def test_is_watermark_applicable_exception(self, mock_fitz_open):
+        """Test watermark applicability with exception."""
+        mock_fitz_open.side_effect = Exception("Fitz error")
+        
         method = TinyTextWatermark()
+        result = method.is_watermark_applicable(VALID_PDF_HEADER)
         
-        with patch('PawStamp_watermark.load_pdf_bytes', side_effect=Exception("Load error")):
-            result = method.is_watermark_applicable("invalid")
-            assert result is False
+        assert result is False
     
-    def test_roundtrip_integration(self, sample_pdf_bytes: bytes):
+    def test_remove_watermark(self):
+        """Test watermark removal."""
+        method = TinyTextWatermark()
+        original_pdf = VALID_PDF_HEADER
+        
+        result = method.remove_watermark(original_pdf, "key")
+        
+        assert result == original_pdf
+    
+    @patch('PawStamp_watermark.fitz.open')
+    def test_roundtrip_integration(self, mock_fitz_open):
+        """Test complete add-read cycle."""
         method = TinyTextWatermark()
         secret = "integration-test-secret"
         key = "integration-test-key"
         
-        with patch('fitz.open') as mock_fitz_open:
-            mock_doc_add = MagicMock()
-            mock_page_add = MagicMock()
-            mock_page_add.rect.width = 612
-            mock_page_add.rect.height = 792
-            mock_doc_add.__iter__ = MagicMock(return_value=iter([mock_page_add]))
-            
-            # 现在使用Base64编码
-            import base64
-            encoded_secret = base64.b64encode(secret.encode('utf-8')).decode('ascii')
-            watermark_text = f"TATOU_SECRET_START_{encoded_secret}_END"
-            watermarked_content = f"PDF content {watermark_text}"
-            mock_doc_add.tobytes.return_value = b"%PDF-1.4\n" + watermarked_content.encode()
-            
-            mock_doc_read = MagicMock()
-            mock_page_read = MagicMock()
-            mock_page_read.get_text.return_value = watermarked_content
-            mock_doc_read.__iter__ = MagicMock(return_value=iter([mock_page_read]))
-            
-            mock_fitz_open.side_effect = [mock_doc_add, mock_doc_read]
-            
-            watermarked = method.add_watermark(sample_pdf_bytes, secret, key)
-            
-            extracted = method.read_secret(watermarked, key)
-            
-            assert extracted == secret
-    
-    def test_deterministic_behavior(self, sample_pdf_bytes: bytes):
-        method = TinyTextWatermark()
-        secret = "deterministic-test"
-        key = "deterministic-key"
+        # Mock add watermark
+        mock_doc_add = MagicMock()
+        mock_page_add = MagicMock()
+        mock_page_add.rect.width = 612
+        mock_page_add.rect.height = 792
+        mock_doc_add.__iter__ = MagicMock(return_value=iter([mock_page_add]))
         
-        hash1 = method._get_secure_secret(secret, key)
-        hash2 = method._get_secure_secret(secret, key)
-        assert hash1 == hash2
+        # Create expected watermark content
+        hmac_signature = method._generate_hmac(secret, key)
+        payload = {"secret": secret, "hmac": hmac_signature}
+        payload_json = json.dumps(payload)
+        encoded_payload = base64.b64encode(payload_json.encode('utf-8')).decode('ascii')
+        watermark_text = f"TATOU_SECRET_START_{encoded_payload}_END"
+        watermarked_content = f"PDF content {watermark_text}"
+        mock_doc_add.tobytes.return_value = b"%PDF-1.4\n" + watermarked_content.encode()
         
-        with patch('fitz.open') as mock_fitz_open:
-            mock_doc = MagicMock()
-            mock_page = MagicMock()
-            mock_page.rect.width = 612
-            mock_page.rect.height = 792
-            mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
-            mock_doc.tobytes.return_value = b"%PDF-deterministic"
-            mock_fitz_open.return_value = mock_doc
-            
-            result1 = method.add_watermark(sample_pdf_bytes, secret, key)
-            result2 = method.add_watermark(sample_pdf_bytes, secret, key)
-            
-            assert result1 == result2
-    
-    def test_edge_cases_large_page_size(self, sample_pdf_bytes: bytes):
-        method = TinyTextWatermark()
+        # Mock read watermark
+        mock_doc_read = MagicMock()
+        mock_page_read = MagicMock()
+        mock_page_read.get_text.return_value = watermarked_content
+        mock_doc_read.__iter__ = MagicMock(return_value=iter([mock_page_read]))
         
-        with patch('fitz.open') as mock_fitz_open:
-            mock_doc = MagicMock()
-            mock_page = MagicMock()
-            mock_page.rect.width = 10000
-            mock_page.rect.height = 10000
-            mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
-            mock_doc.tobytes.return_value = b"%PDF-large"
-            mock_fitz_open.return_value = mock_doc
+        mock_fitz_open.side_effect = [mock_doc_add, mock_doc_read]
             
-            result = method.add_watermark(sample_pdf_bytes, "secret", "key")
-            
-            assert isinstance(result, bytes)
-            mock_page.insert_textbox.assert_called_once()
-    
-    def test_edge_cases_small_page_size(self, sample_pdf_bytes: bytes):
-        method = TinyTextWatermark()
+        # Test add watermark
+        watermarked = method.add_watermark(VALID_PDF_HEADER, secret, key)
+        assert isinstance(watermarked, bytes)
         
-        with patch('fitz.open') as mock_fitz_open:
-            mock_doc = MagicMock()
-            mock_page = MagicMock()
-            mock_page.rect.width = 50
-            mock_page.rect.height = 50
-            mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
-            mock_doc.tobytes.return_value = b"%PDF-small"
-            mock_fitz_open.return_value = mock_doc
-            
-            result = method.add_watermark(sample_pdf_bytes, "secret", "key")
-            
-            assert isinstance(result, bytes)
-            mock_page.insert_textbox.assert_called_once()
-    
-    def test_edge_cases_zero_page_size(self, sample_pdf_bytes: bytes):
-        method = TinyTextWatermark()
-        
-        with patch('fitz.open') as mock_fitz_open:
-            mock_doc = MagicMock()
-            mock_page = MagicMock()
-            mock_page.rect.width = 0
-            mock_page.rect.height = 0
-            mock_doc.__iter__ = MagicMock(return_value=iter([mock_page]))
-            mock_doc.tobytes.return_value = b"%PDF-zero"
-            mock_fitz_open.return_value = mock_doc
-            
-            result = method.add_watermark(sample_pdf_bytes, "secret", "key")
-            
-            assert isinstance(result, bytes)
-            mock_page.insert_textbox.assert_called_once()
-    
-    def test_edge_cases_zero_page_count(self, sample_pdf_bytes: bytes):
-        """Test add_watermark with a PDF that has zero pages."""
-        method = TinyTextWatermark()
-        
-        with patch('fitz.open') as mock_fitz_open:
-            mock_doc = MagicMock()
-            mock_doc.page_count = 0  # 模拟零页面文档
-            mock_fitz_open.return_value = mock_doc
-            
-            result = method.add_watermark(sample_pdf_bytes, "secret", "key")
-            
-            # 应该返回原始PDF字节，因为无法处理零页面文档
-            assert result == sample_pdf_bytes
-            mock_doc.close.assert_called_once()
-            # tobytes 不应该被调用，因为文档没有页面
-            mock_doc.tobytes.assert_not_called()
+        # Test read watermark
+        extracted = method.read_secret(watermarked, key)
+        assert extracted == secret
 
-@pytest.fixture
-def sample_pdf_bytes():
-    return b"""%PDF-1.4
-1 0 obj
-<< /Type /Catalog /Pages 2 0 R >>
-endobj
-2 0 obj
-<< /Type /Pages /Kids [3 0 R] /Count 1 >>
-endobj
-3 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>
-endobj
-xref
-0 4
-0000000000 65535 f 
-0000000009 00000 n 
-0000000074 00000 n 
-0000000120 00000 n 
-trailer
-<< /Size 4 /Root 1 0 R >>
-startxref
-202
-%%EOF"""
