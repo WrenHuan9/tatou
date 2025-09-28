@@ -679,13 +679,15 @@ def create_app():
         except Exception as e:
             return _safe_error("Failed to apply watermark", e, 500)
 
-        # build destination file name: "<original_name>__<intended_to>.pdf"
+        # build destination file name: "<original_name>__<method_name>__<intended_to>__<timestamp>.pdf"
         base_name = Path(row.name or file_path.name).stem
         intended_slug = secure_filename(intended_for)
+        method_name = secure_filename(method)
+        timestamp = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%S%fZ")
         dest_dir = file_path.parent / "watermarks"
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        candidate = f"{base_name}__{intended_slug}.pdf"
+        candidate = f"{base_name}__{method_name}__{intended_slug}__{timestamp}.pdf"
         dest_path = dest_dir / candidate
 
         # write bytes
