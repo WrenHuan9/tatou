@@ -96,10 +96,14 @@ def test_key() -> str:
 @pytest.fixture
 def app_config() -> dict:
     """Test configuration for Flask app."""
+    # 创建一个临时目录，给 STORAGE_DIR 和 AUDIT_LOG_DIR 共用
+    temp_dir = tempfile.mkdtemp()
+    
     return {
         "TESTING": True,
         "SECRET_KEY": "test-secret-key",
-        "STORAGE_DIR": tempfile.mkdtemp(),
+        "STORAGE_DIR": temp_dir,
+        "AUDIT_LOG_DIR": os.path.join(temp_dir, "logs"),  # <--- 关键的新增行
         "TOKEN_TTL_SECONDS": 3600,
         "DB_USER": "test_user",
         "DB_PASSWORD": "test_pass",

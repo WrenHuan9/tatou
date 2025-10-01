@@ -6,7 +6,7 @@ services:
       context: server
       dockerfile: Dockerfile
     ports:
-      - "5001:5000"
+      - "5000:5000"
     volumes:
       - user-files:/app/storage
       - audit-logs:/app/logs
