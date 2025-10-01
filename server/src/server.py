@@ -22,6 +22,7 @@ except Exception:  # dill is optional
 
 import watermarking_utils as WMUtils
 from watermarking_method import WatermarkingMethod, is_pdf_bytes
+from audit_logger import audit_log, audit_log_auth, audit_log_file_access
 
 # from watermarking_utils import METHODS, apply_watermark, read_watermark, explore_pdf, is_watermarking_applicable, get_method
 
@@ -100,14 +101,17 @@ def create_app():
     # --- Routes ---
 
     @app.route("/<path:filename>")
+    @audit_log("static_file_access")
     def static_files(filename):
         return app.send_static_file(filename)
 
     @app.route("/")
+    @audit_log("home_access")
     def home():
         return app.send_static_file("index.html")
 
     @app.get("/healthz")
+    @audit_log("health_check")
     def healthz():
         try:
             with get_engine().connect() as conn:
@@ -122,6 +126,7 @@ def create_app():
 
     # POST /api/create-user {email, login, password}
     @app.post("/api/create-user")
+    @audit_log_auth("user_creation")
     def create_user():
         payload = request.get_json(silent=True) or {}
         email = (payload.get("email") or "").strip().lower()
@@ -152,6 +157,7 @@ def create_app():
 
     # POST /api/login {login, password}
     @app.post("/api/login")
+    @audit_log_auth("user_login")
     def login():
         payload = request.get_json(silent=True) or {}
         email = (payload.get("email") or "").strip()
@@ -186,6 +192,7 @@ def create_app():
     # POST /api/upload-document  (multipart/form-data)
     @app.post("/api/upload-document")
     @require_auth
+    @audit_log("document_upload")
     def upload_document():
         if "file" not in request.files:
             return jsonify({"error": "file is required (multipart/form-data)"}), 400
@@ -266,6 +273,7 @@ def create_app():
     # GET /api/list-documents
     @app.get("/api/list-documents")
     @require_auth
+    @audit_log("document_list")
     def list_documents():
         try:
             with get_engine().connect() as conn:
@@ -299,6 +307,7 @@ def create_app():
     @app.get("/api/list-versions")
     @app.get("/api/list-versions/<int:document_id>")
     @require_auth
+    @audit_log("version_list")
     def list_versions(document_id: int | None = None):
         # Support both path param and ?id=/ ?documentid=
         if document_id is None:
@@ -341,6 +350,7 @@ def create_app():
     # GET /api/list-all-versions
     @app.get("/api/list-all-versions")
     @require_auth
+    @audit_log("all_versions_list")
     def list_all_versions():
         try:
             with get_engine().connect() as conn:
@@ -375,6 +385,7 @@ def create_app():
     @app.get("/api/get-document")
     @app.get("/api/get-document/<int:document_id>")
     @require_auth
+    @audit_log_file_access("document_download")
     def get_document(document_id: int | None = None):
         # Support both path param and ?id=/ ?documentid=
         if document_id is None:
@@ -434,6 +445,7 @@ def create_app():
 
     # GET /api/get-version/<link>  → returns the watermarked PDF (inline)
     @app.get("/api/get-version/<link>")
+    @audit_log_file_access("version_download")
     def get_version(link: str):
         try:
             with get_engine().connect() as conn:
@@ -501,6 +513,7 @@ def create_app():
     @app.route("/api/delete-document", methods=["DELETE", "POST"])  # POST supported for convenience
     @app.route("/api/delete-document/<document_id>", methods=["DELETE"])
     @require_auth
+    @audit_log("document_delete")
     def delete_document(document_id: int | None = None):
         # accept id from path, query (?id= / ?documentid=), or JSON body on POST
         if not document_id:
@@ -597,6 +610,7 @@ def create_app():
     @app.post("/api/create-watermark")
     @app.post("/api/create-watermark/<int:document_id>")
     @require_auth
+    @audit_log("watermark_create")
     def create_watermark(document_id: int | None = None):
         # accept id from path, query (?id= / ?documentid=), or JSON body on GET
         if not document_id:
@@ -820,6 +834,7 @@ def create_app():
 
     # GET /api/get-watermarking-methods -> {"methods":[{"name":..., "description":...}, ...], "count":N}
     @app.get("/api/get-watermarking-methods")
+    @audit_log("watermarking_methods_list")
     def get_watermarking_methods():
         methods = []
 
@@ -831,6 +846,7 @@ def create_app():
     # POST /api/read-watermark-by-link/
     @app.post("/api/read-watermark-by-link/<link>")
     @require_auth
+    @audit_log("watermark_read")
     def read_watermark_by_link(link: str | None = None):
         if not link:
             link = (

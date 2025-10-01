@@ -6,9 +6,10 @@ services:
       context: server
       dockerfile: Dockerfile
     ports:
-      - "5000:5000"
+      - "5001:5000"
     volumes:
       - user-files:/app/storage
+      - audit-logs:/app/logs
     environment:
       - PYTHONUNBUFFERED=1
       # DB connection details for future use by the API
@@ -60,3 +61,4 @@ services:
 volumes:
   db-data:
   user-files:
+  audit-logs:

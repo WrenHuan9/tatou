@@ -14,6 +14,10 @@ else
   echo "WARNING: /app/flag not found, skipping"
 fi
 
+# --- Ensure logs directory exists and has proper permissions ---
+mkdir -p /app/logs
+chmod 755 /app/logs
+
 # --- Start the server ---
 echo "Starting server..."
 exec gunicorn -b 0.0.0.0:5000 server:app
