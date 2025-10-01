@@ -53,3 +53,32 @@ http -v :5000/healthz
 
 # Open your browser at 127.0.0.1:5000 to check if the website is up.
 ```
+
+## Documentation
+
+- [API Documentation](server/API.md) - Complete API reference
+- [Platform Specifications](Platform_specifications.md) - Platform requirements
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                         Client                              │
+│  (PGP-encrypted RMAP authentication + PDF download)         │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     Flask Server                            │
+│  ┌──────────────┐  ┌─────────────┐  ┌──────────────────┐   │
+│  │ RMAP         │  │ Watermarking│  │ User Management  │   │
+│  │ Endpoints    │─▶│ Engine      │  │ & Documents      │   │
+│  └──────────────┘  └─────────────┘  └──────────────────┘   │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    MariaDB Database                         │
+│  (Users, Documents, Watermarked Versions)                   │
+└─────────────────────────────────────────────────────────────┘
+```
