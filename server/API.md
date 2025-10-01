@@ -25,9 +25,9 @@
 - [login](#login) — **POST** `/api/login`
 - [read-watermark-by-link](#read-watermark-by-link) —  **POST** `/api/read-watermark-by-link/<link>`
 - [upload-document](#upload-document) — **POST** `/api/upload-document`
-- [rmap-initiate](#rmap-initiate) — **POST** `/rmap-initiate`
-- [rmap-get-link](#rmap-get-link) — **POST** `/rmap-get-link`
-- [rmap-identify-leak](#rmap-identify-leak) — **POST** `/rmap-identify-leak` (Admin only)
+- [rmap-initiate](#rmap-initiate) — **POST** `/api/rmap-initiate`
+- [rmap-get-link](#rmap-get-link) — **POST** `/api/rmap-get-link`
+- [rmap-identify-leak](#rmap-identify-leak) — **POST** `/api/rmap-identify-leak` (Admin only)
 
 
 
