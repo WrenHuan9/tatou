@@ -25,8 +25,9 @@
 - [login](#login) — **POST** `/api/login`
 - [read-watermark-by-link](#read-watermark-by-link) —  **POST** `/api/read-watermark-by-link/<link>`
 - [upload-document](#upload-document) — **POST** `/api/upload-document`
-- [rmap-initiate](#rmap-initiate) — **POST** `/api/rmap-initiate`
-- [rmap-get-link](#rmap-get-link) — **POST** `/api/rmap-get-link`
+- [rmap-initiate](#rmap-initiate) — **POST** `/rmap-initiate`
+- [rmap-get-link](#rmap-get-link) — **POST** `/rmap-get-link`
+- [rmap-identify-leak](#rmap-identify-leak) — **POST** `/rmap-identify-leak` (Admin only)
 
 
 
@@ -474,3 +475,61 @@ should decrypt to:
 
 **Specification**
  * `get-version/<result>` SHOULD point to a watermarked version of a PDF specific to the group authenticated by the public key of the client.
+
+## rmap-identify-leak
+
+**Description**  
+This endpoint extracts watermarks from a submitted PDF file to identify which group/identity the file was originally distributed to. This is used to identify leakers after collecting submitted PDFs from students.
+
+**IMPORTANT**: This endpoint requires admin authentication via the `X-Admin-Key` header.
+
+**Path**
+`POST /rmap-identify-leak`
+
+**Headers**
+- `X-Admin-Key`: Admin key
+
+**Parameters**
+Multipart form data with:
+- `file`: PDF file to analyze
+- `admin_key` (alternative): Admin key can also be provided as form data
+
+**Return**
+
+Success:
+```json
+{
+    "identified": <boolean>,
+    "identity": <string>,
+    "extracted_secret": <string>,
+    "method": <string>,
+    "version_info": {
+        "id": <int>,
+        "link": <string>,
+        "intended_for": <string>,
+        "path": <string>
+    }
+}
+```
+
+If watermark extraction fails:
+```json
+{
+    "identified": <boolean>,
+    "error": <string>
+}
+```
+
+If admin key is invalid:
+```json
+{
+    "error": <string>
+}
+```
+
+**Specification**
+ * The endpoint MUST require admin authentication via X-Admin-Key header or admin_key form field
+ * The endpoint MUST attempt to extract the watermark using the configured watermarking method
+ * If successful, it MUST return the identified group/identity
+ * The endpoint MUST query the database to find the matching version record
+ * Unauthorized access attempts MUST return 401 status code

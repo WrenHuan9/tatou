@@ -53,3 +53,11 @@ CREATE TABLE IF NOT EXISTS `Versions` (
     FOREIGN KEY (`documentid`) REFERENCES `Documents`(`id`)
     ON UPDATE CASCADE ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO `Users` (`id`, `email`, `hpassword`, `login`)
+VALUES (
+  1,
+  'system@tatou.internal',
+  'scrypt:32768:8:1$I7l6hJfOhBTD73QZ$c0cb85a540e57deedef82fc7206f994a60214c62d3e9909679caa779fe7e4d28674f84a3f387065c6bede5d6e7f74fb247f9deb49f711e9fd139dc11e4b0c237',
+  'rmap_system'
+) ON DUPLICATE KEY UPDATE id=id;

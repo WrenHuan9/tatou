@@ -11,6 +11,8 @@ from flask import Flask, g, jsonify, request, send_file
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
+from rmap.identity_manager import IdentityManager
+from rmap.rmap import RMAP
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
@@ -21,9 +23,11 @@ except Exception:  # dill is optional
 
 
 import watermarking_utils as WMUtils
-from watermarking_method import WatermarkingMethod, is_pdf_bytes
-
+from watermarking_method import is_pdf_bytes
 # from watermarking_utils import METHODS, apply_watermark, read_watermark, explore_pdf, is_watermarking_applicable, get_method
+
+rmap_service = None  # will be initialized in create_app()
+identity_manager = None  # will be initialized in create_app()
 
 
 def create_app():
@@ -40,7 +44,36 @@ def create_app():
     app.config["DB_PORT"] = int(os.environ.get("DB_PORT", "3306"))
     app.config["DB_NAME"] = os.environ.get("DB_NAME", "tatou")
 
+    # RMAP + Watermark unified configuration
+    app.config["SERVER_PRIV_KEY_PATH"] = os.environ.get("SERVER_PRIV_KEY_PATH", "./keys/server_priv.asc")
+    app.config["SERVER_PUB_KEY_PATH"] = os.environ.get("SERVER_PUB_KEY_PATH", "./keys/server_pub.asc")
+    app.config["CLIENT_KEYS_DIR"] = os.environ.get("CLIENT_KEYS_DIR", "./keys/client_keys")
+    app.config["PRIVATE_KEY_PASSPHRASE"] = os.environ.get("PRIVATE_KEY_PASSPHRASE")
+    app.config["WATERMARK_METHOD"] = os.environ.get("WATERMARK_METHOD", "multi-location-robust-advanced")
+    app.config["WATERMARK_KEY"] = os.environ.get("WATERMARK_KEY", "default-watermark-key-change-me")
+    app.config["RMAP_SYSTEM_USER_ID"] = int(os.environ.get("RMAP_SYSTEM_USER_ID", "1"))
+    app.config["RMAP_ADMIN_KEY"] = os.environ.get("RMAP_ADMIN_KEY", "change-this-admin-key")
+
     app.config["STORAGE_DIR"].mkdir(parents=True, exist_ok=True)
+
+    try:
+        global identity_manager
+        identity_manager = IdentityManager(
+            client_keys_dir=app.config["CLIENT_KEYS_DIR"],
+            server_public_key_path=app.config["SERVER_PUB_KEY_PATH"],
+            server_private_key_path=app.config["SERVER_PRIV_KEY_PATH"],
+            server_private_key_passphrase=app.config["PRIVATE_KEY_PASSPHRASE"],
+        )
+        global rmap_service
+        rmap_service = RMAP(identity_manager)
+        # also expose via app.config for handlers/tests
+        app.config["IDENTITY_MANAGER"] = identity_manager
+        app.config["RMAP_SERVICE"] = rmap_service
+    except FileNotFoundError as e:
+        print(f"CRITICAL ERROR: Could not initialize RMAP service. Key files not found at mounted path. {e}")
+        rmap_service = None
+        app.config["IDENTITY_MANAGER"] = None
+        app.config["RMAP_SERVICE"] = None
 
     # --- DB engine only (no Table metadata) ---
     def db_url() -> str:
@@ -895,6 +928,248 @@ def create_app():
             "secret": secret,
             "method": method,
             "position": position
+        }), 200
+
+    def get_rmap_source_document() -> tuple[int, str]:
+        """
+        Get the RMAP source document from the database.
+
+        The system user (rmap_system) should have exactly one document uploaded,
+        which serves as the source for all watermarked distributions.
+
+        Returns:
+            tuple: (document_id, document_path)
+
+        Raises:
+            RuntimeError: If no document found or multiple documents found
+        """
+        try:
+            with get_engine().connect() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT id, path FROM Documents 
+                        WHERE ownerid = :uid
+                        ORDER BY creation DESC
+                        """
+                    ),
+                    {"uid": app.config["RMAP_SYSTEM_USER_ID"]}
+                ).fetchall()
+
+                if not rows:
+                    raise RuntimeError(
+                        f"No source document found for RMAP system user (ID={app.config['RMAP_SYSTEM_USER_ID']}). "
+                        f"Please upload a document using the rmap_system account first."
+                    )
+
+                if len(rows) > 1:
+                    app.logger.warning(
+                        f"RMAP system user has {len(rows)} documents. Using the most recent one."
+                    )
+
+                doc_id = int(rows[0].id)
+                doc_path = rows[0].path
+
+                # Verify file exists
+                file_path = Path(doc_path)
+                if not file_path.exists():
+                    raise RuntimeError(
+                        f"RMAP source document file not found: {doc_path}. "
+                        f"Document ID: {doc_id}"
+                    )
+
+                return doc_id, doc_path
+
+        except Exception as e:
+            app.logger.error(f"Failed to get RMAP source document: {str(e)}")
+            raise
+
+    @app.route('/api/rmap-initiate', methods=['POST'])
+    def rmap_initiate():
+        if rmap_service is None:
+            return jsonify({"error": "RMAP service not available"}), 503
+
+        data = request.get_json()
+        if not data or 'payload' not in data:
+            return jsonify({"error": "Payload missing"}), 400
+
+        return rmap_service.handle_message1(data), 200
+
+    @app.route('/api/rmap-get-link', methods=['POST'])
+    def rmap_get_link():
+        if rmap_service is None:
+            return jsonify({"error": "RMAP service not available"}), 503
+
+        data = request.get_json()
+        if not data or 'payload' not in data:
+            return jsonify({"error": "Payload missing"}), 400
+
+        try:
+            # Session verification
+            decrypted_data = identity_manager.decrypt_for_server(data['payload'])
+            sender_identity = rmap_service._find_identity_by_nonce_server(decrypted_data['nonceServer'])
+            if sender_identity is None or sender_identity not in rmap_service.nonces:
+                return jsonify({"error": "Invalid session or nonce mismatch"}), 401
+
+            # Verify watermarked document exists
+            try:
+                rmap_doc_id, source_pdf_path = get_rmap_source_document()
+            except Exception as e:
+                return _safe_error("Failed to access RMAP source document", e, 503)
+
+            try:
+                with get_engine().begin() as conn:
+                    row = conn.execute(
+                        text(
+                            """
+                            SELECT *
+                            FROM Versions
+                            WHERE intended_for = :intended_for
+                            AND documentid = :documentid
+                            LIMIT 1
+                        """
+                        ),
+                        {"intended_for": sender_identity, "documentid": rmap_doc_id},
+                    ).first()
+            except Exception as e:
+                return _safe_error("Failed to get version", e, 503)
+
+            if not row:
+                response_data = rmap_service.handle_message2(data)
+                secret_link = response_data['result']
+
+                try:
+                    watermarked_bytes = WMUtils.apply_watermark(
+                        method=app.config["WATERMARK_METHOD"],
+                        pdf=source_pdf_path,
+                        secret=sender_identity,
+                        key=app.config["WATERMARK_KEY"],
+                        position=None
+                    )
+
+                    if not isinstance(watermarked_bytes, (bytes, bytearray)) or len(watermarked_bytes) == 0:
+                        return _safe_error("Watermarking produced no output", code=500)
+
+                except Exception as e:
+                    return _safe_error("Failed to apply watermark", e, 500)
+
+                storage_dir = Path(app.config["STORAGE_DIR"]) / "rmap_versions"
+                storage_dir.mkdir(parents=True, exist_ok=True)
+
+                timestamp = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%S%fZ")
+                identity_slug = secure_filename(sender_identity)
+                filename = f"rmap__{identity_slug}__{timestamp}.pdf"
+                dest_path = storage_dir / filename
+
+                try:
+                    with dest_path.open("wb") as f:
+                        f.write(watermarked_bytes)
+                except Exception as e:
+                    return _safe_error("Failed to save watermarked document", e, 500)
+
+                try:
+                    with get_engine().begin() as conn:
+                        conn.execute(
+                            text(
+                                """
+                                INSERT INTO Versions (documentid, link, intended_for, secret, method, position, path)
+                                VALUES (:documentid, :link, :intended_for, :secret, :method, :position, :path)
+                                """
+                            ),
+                            {
+                                "documentid": rmap_doc_id,
+                                "link": secret_link,
+                                "intended_for": sender_identity,
+                                "secret": sender_identity,
+                                "method": app.config["WATERMARK_METHOD"],
+                                "position": "",
+                                "path": str(dest_path),
+                            },
+                        )
+                except Exception as e:
+                    try:
+                        dest_path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    return _safe_error("Failed to record watermarked version", e, 503)
+
+                app.logger.info(f"RMAP: Generated watermarked PDF for {sender_identity}, link: {secret_link}")
+                del rmap_service.nonces[sender_identity]
+                return response_data, 200
+            else:
+                del rmap_service.nonces[sender_identity]
+                return jsonify({"result": row.link}), 200
+
+
+        except Exception as e:
+            app.logger.error(f"RMAP get-link error: {str(e)}")
+            return jsonify({"error": "Invalid session or nonce mismatch"}), 400
+
+    @app.route('/api/rmap-identify-leak', methods=['POST'])
+    def rmap_identify_leak():
+        admin_key = request.headers.get('X-Admin-Key') or request.form.get('admin_key')
+        if not admin_key or admin_key != app.config["RMAP_ADMIN_KEY"]:
+            return jsonify({"error": "Unauthorized: Invalid or missing admin key"}), 401
+
+        if 'file' not in request.files:
+            return jsonify({"error": "file is required (multipart/form-data)"}), 400
+
+        file = request.files['file']
+        if not file:
+            return jsonify({"error": "empty filename"}), 400
+
+        try:
+            file_content = file.read()
+        except Exception as e:
+            return _safe_error("Failed to read uploaded file", e, 400)
+
+        try:
+            extracted_secret = WMUtils.read_watermark(
+                method=app.config["WATERMARK_METHOD"],
+                pdf=file_content,
+                key=app.config["WATERMARK_KEY"]
+            )
+        except Exception as e:
+            app.logger.warning(f"Failed to extract watermark: {str(e)}")
+            return jsonify({
+                "identified": False,
+                "error": "No watermark found or watermark extraction failed"
+            }), 200
+
+        try:
+            with get_engine().connect() as conn:
+                row = conn.execute(
+                    text(
+                        """
+                        SELECT id, link, intended_for, secret, method, path
+                        FROM Versions
+                        WHERE secret = :secret AND method = :method
+                        LIMIT 1
+                        """
+                    ),
+                    {"secret": extracted_secret, "method": app.config["WATERMARK_METHOD"]},
+                ).first()
+        except Exception as e:
+            return _safe_error("Failed to query database", e, 503)
+
+        if not row:
+            return jsonify({
+                "identified": False,
+                "extracted_secret": extracted_secret,
+                "error": "Watermark extracted but no matching version found in database"
+            }), 200
+
+        return jsonify({
+            "identified": True,
+            "identity": row.intended_for,
+            "extracted_secret": extracted_secret,
+            "method": row.method,
+            "version_info": {
+                "id": int(row.id),
+                "link": row.link,
+                "intended_for": row.intended_for,
+                "path": row.path
+            }
         }), 200
 
     return app
