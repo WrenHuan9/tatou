@@ -6,7 +6,7 @@ services:
       context: server
       dockerfile: Dockerfile
     ports:
-      - "8000:5000"
+      - "5000:5000"
     volumes:
       - user-files:/app/storage
       - ./keys:/app/keys:ro
@@ -44,7 +44,7 @@ services:
       timeout: 5s
       retries: 5
     ports:
-      - "3307:3306"
+      - "3306:3306"
     restart: unless-stopped
 
   phpmyadmin:
