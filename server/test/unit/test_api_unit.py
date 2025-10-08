@@ -226,7 +226,7 @@ class TestCompleteAuthenticationFlow:
     def test_token_authentication(self, client: FlaskClient, app: Flask):
         """Test token-based authentication."""
         # Create a valid token
-        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
+        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
         token_data = {"uid": 1, "login": "testuser", "email": "test@example.com"}
         valid_token = serializer.dumps(token_data)
 
@@ -263,7 +263,7 @@ class TestDocumentManagement:
 
     def _get_valid_token(self, app: Flask) -> str:
         """Helper method to create a valid token."""
-        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
+        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
         token_data = {"uid": 1, "login": "testuser", "email": "test@example.com"}
         return serializer.dumps(token_data)
 
@@ -452,7 +452,7 @@ class TestWatermarkManagement:
 
     def _get_valid_token(self, app: Flask) -> str:
         """Helper method to create a valid token."""
-        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
+        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
         token_data = {"uid": 1, "login": "testuser", "email": "test@example.com"}
         return serializer.dumps(token_data)
 
@@ -1170,7 +1170,7 @@ class TestErrorHandlingAndEdgeCases:
     @pytest.mark.xfail
     def test_file_system_errors(self, client: FlaskClient, app: Flask, sample_pdf_bytes: bytes):
         """Test handling of file system errors."""
-        token = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth").dumps({
+        token = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6").dumps({
             "uid": 1, "login": "testuser", "email": "test@example.com"
         })
         headers = {"Authorization": f"Bearer {token}"}
@@ -1203,7 +1203,7 @@ class TestErrorHandlingAndEdgeCases:
 
     def test_watermarking_errors(self, client: FlaskClient, app: Flask):
         """Test handling of watermarking-related errors."""
-        token = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth").dumps({
+        token = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6").dumps({
             "uid": 1, "login": "testuser", "email": "test@example.com"
         })
         headers = {"Authorization": f"Bearer {token}"}
@@ -1235,7 +1235,7 @@ class TestErrorHandlingAndEdgeCases:
     @pytest.mark.xfail
     def test_large_file_handling(self, client: FlaskClient, app: Flask):
         """Test handling of large file uploads."""
-        token = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth").dumps({
+        token = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6").dumps({
             "uid": 1, "login": "testuser", "email": "test@example.com"
         })
         headers = {"Authorization": f"Bearer {token}"}
@@ -1271,7 +1271,7 @@ class TestErrorHandlingAndEdgeCases:
 
     def test_concurrent_operations(self, client: FlaskClient, app: Flask):
         """Test handling of concurrent operations."""
-        token = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth").dumps({
+        token = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6").dumps({
             "uid": 1, "login": "testuser", "email": "test@example.com"
         })
         headers = {"Authorization": f"Bearer {token}"}
