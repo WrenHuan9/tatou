@@ -84,44 +84,76 @@ def create_app():
 
     @app.before_request
     def _log_request():
-        try:
-            user = getattr(g, "user", None)
-        except Exception:
-            user = None
-        user_ctx = {
-            "id": (user or {}).get("id") if isinstance(user, dict) else None,
-            "login": (user or {}).get("login") if isinstance(user, dict) else None,
-        }
-        # Target object hints
-        target = request.view_args.copy() if getattr(request, "view_args", None) else {}
-        for key in ("id", "document_id", "documentid", "link"):
-            if key in request.args and key not in target:
-                target[key] = request.args.get(key)
-        app.logger.info(
-            "event=request start method=%s path=%s user=%s target=%s",
-            request.method,
-            request.path,
-            user_ctx,
-            target,
-        )
+        # Store request info in g for later use
+        g.request_start_time = dt.datetime.utcnow()
+        g.client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.environ.get('REMOTE_ADDR', 'unknown'))
+        
+        # Only log requests for API endpoints, skip static files
+        if request.path.startswith('/api/'):
+            try:
+                user = getattr(g, "user", None)
+            except Exception:
+                user = None
+            user_ctx = {
+                "id": (user or {}).get("id") if isinstance(user, dict) else None,
+                "login": (user or {}).get("login") if isinstance(user, dict) else None,
+            }
+            
+            # Get request parameters (exclude file uploads)
+            params = {}
+            if request.args:
+                params.update(dict(request.args))
+            if request.is_json:
+                json_data = request.get_json(silent=True) or {}
+                # Filter out sensitive fields and file data
+                for key, value in json_data.items():
+                    if key not in ['password', 'file', 'file_content'] and not isinstance(value, (bytes, bytearray)):
+                        params[key] = value
+            
+            # Target object hints
+            target = request.view_args.copy() if getattr(request, "view_args", None) else {}
+            for key in ("id", "document_id", "documentid", "link"):
+                if key in request.args and key not in target:
+                    target[key] = request.args.get(key)
+            
+            app.logger.info(
+                "event=api_request method=%s path=%s ip=%s user=%s params=%s target=%s",
+                request.method,
+                request.path,
+                g.client_ip,
+                user_ctx,
+                params,
+                target,
+            )
 
     @app.after_request
     def _log_response(response):
-        try:
-            user = getattr(g, "user", None)
-        except Exception:
-            user = None
-        user_ctx = {
-            "id": (user or {}).get("id") if isinstance(user, dict) else None,
-            "login": (user or {}).get("login") if isinstance(user, dict) else None,
-        }
-        app.logger.info(
-            "event=response status=%s method=%s path=%s user=%s",
-            response.status,
-            request.method,
-            request.path,
-            user_ctx,
-        )
+        # Only log responses for API endpoints
+        if request.path.startswith('/api/'):
+            try:
+                user = getattr(g, "user", None)
+            except Exception:
+                user = None
+            user_ctx = {
+                "id": (user or {}).get("id") if isinstance(user, dict) else None,
+                "login": (user or {}).get("login") if isinstance(user, dict) else None,
+            }
+            
+            # Calculate response time
+            duration_ms = None
+            if hasattr(g, 'request_start_time'):
+                duration = dt.datetime.utcnow() - g.request_start_time
+                duration_ms = int(duration.total_seconds() * 1000)
+            
+            app.logger.info(
+                "event=api_response status=%s method=%s path=%s ip=%s user=%s duration_ms=%s",
+                response.status,
+                request.method,
+                request.path,
+                getattr(g, 'client_ip', 'unknown'),
+                user_ctx,
+                duration_ms,
+            )
         return response
 
     @app.errorhandler(Exception)
@@ -135,7 +167,8 @@ def create_app():
             "id": (user or {}).get("id") if isinstance(user, dict) else None,
             "login": (user or {}).get("login") if isinstance(user, dict) else None,
         }
-        app.logger.exception("event=exception path=%s method=%s user=%s", request.path, request.method, user_ctx)
+        client_ip = getattr(g, 'client_ip', 'unknown')
+        app.logger.exception("event=exception path=%s method=%s ip=%s user=%s", request.path, request.method, client_ip, user_ctx)
         return _safe_error("Internal server error", e, 500)
 
     try:
@@ -172,7 +205,7 @@ def create_app():
 
     # --- Helpers ---
     def _serializer():
-        return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
+        return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
 
     def _auth_error(msg: str, code: int = 401):
         return jsonify({"error": msg}), code
@@ -186,25 +219,26 @@ def create_app():
         @wraps(f)
         def wrapper(*args, **kwargs):
             auth = request.headers.get("Authorization", "")
+            client_ip = getattr(g, 'client_ip', 'unknown')
             if not auth.startswith("Bearer "):
-                app.logger.info("event=auth_failed reason=missing_bearer method=%s path=%s", request.method, request.path)
+                app.logger.info("event=auth_failed reason=missing_bearer method=%s path=%s ip=%s", request.method, request.path, client_ip)
                 return _auth_error("Missing or invalid Authorization header")
             token = auth.split(" ", 1)[1].strip()
             try:
                 data = _serializer().loads(token, max_age=app.config["TOKEN_TTL_SECONDS"])
             except SignatureExpired:
-                app.logger.info("event=auth_failed reason=token_expired method=%s path=%s", request.method, request.path)
+                app.logger.info("event=auth_failed reason=token_expired method=%s path=%s ip=%s", request.method, request.path, client_ip)
                 return _auth_error("Token expired")
             except BadSignature:
-                app.logger.info("event=auth_failed reason=invalid_token method=%s path=%s", request.method, request.path)
+                app.logger.info("event=auth_failed reason=invalid_token method=%s path=%s ip=%s", request.method, request.path, client_ip)
                 return _auth_error("Invalid token")
             g.user = {
                 "id": int(data["uid"]),
                 "login": data["login"],
                 "email": data.get("email"),
             }
-            app.logger.info("event=auth_success user_id=%s login=%s method=%s path=%s", 
-                            g.user["id"], g.user["login"], request.method, request.path)
+            app.logger.info("event=auth_success user_id=%s login=%s method=%s path=%s ip=%s", 
+                            g.user["id"], g.user["login"], request.method, request.path, client_ip)
             return f(*args, **kwargs)
 
         return wrapper
