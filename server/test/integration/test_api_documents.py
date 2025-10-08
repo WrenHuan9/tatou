@@ -23,7 +23,7 @@ class TestDocumentManagement:
         """Test successful document upload."""
         # Create a valid auth token
         from itsdangerous import URLSafeTimedSerializer
-        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
+        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
         
@@ -91,7 +91,7 @@ class TestDocumentManagement:
     def test_upload_document_no_file(self, client: FlaskClient, app: Flask):
         """Test document upload without file."""
         from itsdangerous import URLSafeTimedSerializer
-        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
+        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
         
@@ -108,7 +108,7 @@ class TestDocumentManagement:
     def test_upload_document_empty_filename(self, client: FlaskClient, app: Flask):
         """Test document upload with empty filename."""
         from itsdangerous import URLSafeTimedSerializer
-        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
+        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
         
@@ -130,7 +130,7 @@ class TestDocumentManagement:
     def test_list_documents_success(self, client: FlaskClient, app: Flask):
         """Test successful document listing."""
         from itsdangerous import URLSafeTimedSerializer
-        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
+        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
         
@@ -172,7 +172,7 @@ class TestDocumentManagement:
     def test_list_documents_empty(self, client: FlaskClient, app: Flask):
         """Test document listing with no documents."""
         from itsdangerous import URLSafeTimedSerializer
-        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
+        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
         
@@ -196,7 +196,7 @@ class TestDocumentManagement:
     def test_get_document_success(self, client: FlaskClient, app: Flask):
         """Test successful document retrieval."""
         from itsdangerous import URLSafeTimedSerializer
-        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
+        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
         
@@ -237,7 +237,7 @@ class TestDocumentManagement:
     def test_get_document_not_found(self, client: FlaskClient, app: Flask):
         """Test document retrieval for non-existent document."""
         from itsdangerous import URLSafeTimedSerializer
-        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
+        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
         
@@ -261,7 +261,7 @@ class TestDocumentManagement:
     def test_get_document_file_missing(self, client: FlaskClient, app: Flask):
         """Test document retrieval when file is missing from disk."""
         from itsdangerous import URLSafeTimedSerializer
-        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
+        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
         
@@ -371,7 +371,7 @@ class TestDocumentManagement:
     def test_complete_document_lifecycle(self, client: FlaskClient, app: Flask):
         """Test complete document lifecycle: upload -> list -> get -> delete."""
         from itsdangerous import URLSafeTimedSerializer
-        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
+        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
         
