@@ -381,7 +381,12 @@ def create_app():
         final_name = request.form.get("name") or fname
         stored_name = f"{ts}__{fname}"
         stored_path = user_dir / stored_name
-        file.save(stored_path)
+        try:
+            file.save(stored_path)
+        except Exception as e:
+            app.logger.error("event=upload_document_failed reason=file_error filename=%s user_id=%s error=%s",
+                           fname, g.user["id"], str(e))
+            return _safe_error("Failed to upload document", e, 500)
 
         sha_hex = _sha256_file(stored_path)
         size = stored_path.stat().st_size
@@ -1168,6 +1173,7 @@ def create_app():
             raise
 
     @app.route('/api/rmap-initiate', methods=['POST'])
+    @app.route('/rmap-initiate', methods=['POST'])
     def rmap_initiate():
         if rmap_service is None:
             app.logger.error("event=rmap_initiate_failed reason=service_unavailable")
@@ -1189,6 +1195,7 @@ def create_app():
             return response, 200
 
     @app.route('/api/rmap-get-link', methods=['POST'])
+    @app.route('/rmap-get-link', methods=['POST'])
     def rmap_get_link():
         if rmap_service is None:
             app.logger.error("event=rmap_get_link_failed reason=service_unavailable")
