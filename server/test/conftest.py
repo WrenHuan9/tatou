@@ -4,7 +4,7 @@ import os
 import tempfile
 import shutil
 from pathlib import Path
-from typing import Generator, Dict, Any
+from typing import Generator, Dict, Any, List
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -112,27 +112,48 @@ def app_config() -> dict:
 @pytest.fixture
 def app(app_config: dict) -> Flask:
     """Create Flask app instance for testing."""
+    # Ensure STORAGE_DIR is Path object
+    app_config["STORAGE_DIR"] = Path(app_config["STORAGE_DIR"])
+
     # Set environment variables for the app
     for key, value in app_config.items():
         os.environ[key] = str(value)
+
+    # Add src directory to Python path
+    import sys
+    src_path = Path(__file__).parent.parent / "src"
+    if str(src_path) not in sys.path:
+        sys.path.insert(0, str(src_path))
 
     with patch('sqlalchemy.create_engine') as mock_create_engine:
         mock_conn = MagicMock()
         mock_engine = MagicMock()
         mock_create_engine.return_value = mock_engine
-        mock_engine.connect.return_value.__enter__.return_value = mock_conn
-        mock_engine.begin.return_value.__enter__.return_value = mock_conn
-    
+
+        # IMPORTANT: Make connect() return a context manager that yields mock_conn
+        mock_context_manager = MagicMock()
+        mock_context_manager.__enter__ = MagicMock(return_value=mock_conn)
+        mock_context_manager.__exit__ = MagicMock(return_value=False)
+        mock_engine.connect.return_value = mock_context_manager
+
+        # Same for begin()
+        mock_begin_context = MagicMock()
+        mock_begin_context.__enter__ = MagicMock(return_value=mock_conn)
+        mock_begin_context.__exit__ = MagicMock(return_value=False)
+        mock_engine.begin.return_value = mock_begin_context
+
         # Import and create app after setting env vars
         from server.src.server import create_app
         app = create_app()
         app.config.update(app_config)
 
+        # CRITICAL: Store mock engine in the location get_engine() expects
+        app.config['_ENGINE'] = mock_engine
         app.config['mock_db_engine'] = mock_engine
         app.config['mock_db_conn'] = mock_conn
-    
+
         yield app
-    
+
     # Cleanup
     for key in app_config.keys():
         os.environ.pop(key, None)
@@ -172,6 +193,27 @@ def auth_headers(client: FlaskClient, test_user_data: dict) -> dict:
     
     return {}
 
+@pytest.fixture
+def auth_token(app) -> str:
+    """Generate an authentication token directly without database operations."""
+    from itsdangerous import URLSafeTimedSerializer
+
+    serializer = URLSafeTimedSerializer(
+        app.config["SECRET_KEY"],
+        salt="tatou-auth"
+    )
+    token = serializer.dumps({
+        "uid": 1,
+        "login": "testuser",
+        "email": "test@example.com"
+    })
+    return token
+
+
+@pytest.fixture
+def simple_auth_headers(auth_token: str) -> dict:
+    """Create auth headers from token without database operations."""
+    return {"Authorization": f"Bearer {auth_token}"}
 
 @pytest.fixture
 def mock_db_engine():
@@ -278,7 +320,7 @@ def sample_watermark_request() -> Dict[str, Any]:
 
 
 @pytest.fixture
-def multiple_test_users() -> list[Dict[str, str]]:
+def multiple_test_users() -> List[Dict[str, str]]:
     """Multiple test users for testing user interactions."""
     return [
         {

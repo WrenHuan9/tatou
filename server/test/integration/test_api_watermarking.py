@@ -18,7 +18,6 @@ from flask.testing import FlaskClient
 class TestWatermarkingFunctionality:
     """Test watermarking functionality."""
     
-    @pytest.mark.xfail
     def test_create_watermark_success(self, client: FlaskClient, app: Flask):
         """Test successful watermark creation."""
         from itsdangerous import URLSafeTimedSerializer
@@ -84,7 +83,6 @@ class TestWatermarkingFunctionality:
             assert "filename" in result
             assert result["size"] == len(watermarked_content)
     
-    @pytest.mark.xfail
     def test_create_watermark_no_auth(self, client: FlaskClient):
         """Test watermark creation without authentication."""
         watermark_data = {
@@ -100,7 +98,6 @@ class TestWatermarkingFunctionality:
         result = response.get_json()
         assert "error" in result
     
-    @pytest.mark.xfail
     def test_create_watermark_missing_fields(self, client: FlaskClient, app: Flask):
         """Test watermark creation with missing required fields."""
         from itsdangerous import URLSafeTimedSerializer
@@ -138,7 +135,6 @@ class TestWatermarkingFunctionality:
             assert "error" in result
             assert "required" in result["error"]
     
-    @pytest.mark.xfail
     def test_create_watermark_document_not_found(self, client: FlaskClient, app: Flask):
         """Test watermark creation for non-existent document."""
         from itsdangerous import URLSafeTimedSerializer
@@ -153,25 +149,26 @@ class TestWatermarkingFunctionality:
             "key": "encryption-key-456"
         }
         
-        with patch('sqlalchemy.create_engine') as mock_create_engine:
-            mock_conn = MagicMock()
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            mock_engine.connect.return_value.__enter__.return_value = mock_conn
-            
-            # Mock document not found
-            mock_conn.execute.return_value.first.return_value = None
-            
-            response = client.post("/api/create-watermark/999", 
-                                 json=watermark_data, 
-                                 headers=headers)
-            
-            assert response.status_code == 404
-            result = response.get_json()
-            assert "error" in result
-            assert "not found" in result["error"]
+        # Use the mock engine from conftest.py
+        mock_engine = app.config['mock_db_engine']
+        mock_conn = app.config['mock_db_conn']
+        
+        # Reset mock state completely
+        mock_conn.reset_mock()
+        mock_engine.reset_mock()
+        
+        # Mock document not found
+        mock_conn.execute.return_value.first.return_value = None
+        
+        response = client.post("/api/create-watermark/999", 
+                             json=watermark_data, 
+                             headers=headers)
+        
+        assert response.status_code == 404
+        result = response.get_json()
+        assert "error" in result
+        assert "not found" in result["error"]
     
-    @pytest.mark.xfail
     def test_create_watermark_not_applicable(self, client: FlaskClient, app: Flask):
         """Test watermark creation when method is not applicable."""
         from itsdangerous import URLSafeTimedSerializer
@@ -186,17 +183,15 @@ class TestWatermarkingFunctionality:
             "key": "encryption-key-456"
         }
         
-        with patch('sqlalchemy.create_engine') as mock_create_engine, \
-             patch('pathlib.Path.is_absolute', return_value=False), \
+        with patch('pathlib.Path.is_absolute', return_value=False), \
              patch('pathlib.Path.resolve') as mock_resolve, \
              patch('pathlib.Path.relative_to'), \
              patch('pathlib.Path.exists', return_value=True), \
              patch('watermarking_utils.is_watermarking_applicable', return_value=False):
             
-            mock_conn = MagicMock()
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            mock_engine.connect.return_value.__enter__.return_value = mock_conn
+            # Use the mock engine from conftest.py
+            mock_engine = app.config['mock_db_engine']
+            mock_conn = app.config['mock_db_conn']
             
             # Mock document lookup
             mock_doc = MagicMock()
@@ -216,7 +211,6 @@ class TestWatermarkingFunctionality:
             assert "error" in result
             assert "not applicable" in result["error"]
     
-    @pytest.mark.xfail
     def test_create_watermark_file_missing(self, client: FlaskClient, app: Flask):
         """Test watermark creation when document file is missing."""
         from itsdangerous import URLSafeTimedSerializer
@@ -231,16 +225,14 @@ class TestWatermarkingFunctionality:
             "key": "encryption-key-456"
         }
         
-        with patch('sqlalchemy.create_engine') as mock_create_engine, \
-             patch('pathlib.Path.is_absolute', return_value=False), \
+        with patch('pathlib.Path.is_absolute', return_value=False), \
              patch('pathlib.Path.resolve') as mock_resolve, \
              patch('pathlib.Path.relative_to'), \
              patch('pathlib.Path.exists', return_value=False):
             
-            mock_conn = MagicMock()
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            mock_engine.connect.return_value.__enter__.return_value = mock_conn
+            # Use the mock engine from conftest.py
+            mock_engine = app.config['mock_db_engine']
+            mock_conn = app.config['mock_db_conn']
             
             # Mock document lookup
             mock_doc = MagicMock()
@@ -260,7 +252,6 @@ class TestWatermarkingFunctionality:
             assert "error" in result
             assert "missing on disk" in result["error"]
     
-    @pytest.mark.xfail
     def test_read_watermark_success(self, client: FlaskClient, app: Flask):
         """Test successful watermark reading."""
         from itsdangerous import URLSafeTimedSerializer
@@ -276,17 +267,15 @@ class TestWatermarkingFunctionality:
         
         expected_secret = "confidential-info-123"
         
-        with patch('sqlalchemy.create_engine') as mock_create_engine, \
-             patch('pathlib.Path.is_absolute', return_value=False), \
+        with patch('pathlib.Path.is_absolute', return_value=False), \
              patch('pathlib.Path.resolve') as mock_resolve, \
              patch('pathlib.Path.relative_to'), \
              patch('pathlib.Path.exists', return_value=True), \
              patch('watermarking_utils.read_watermark', return_value=expected_secret):
             
-            mock_conn = MagicMock()
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            mock_engine.connect.return_value.__enter__.return_value = mock_conn
+            # Use the mock engine from conftest.py
+            mock_engine = app.config['mock_db_engine']
+            mock_conn = app.config['mock_db_conn']
             
             # Mock document lookup
             mock_doc = MagicMock()
@@ -308,7 +297,6 @@ class TestWatermarkingFunctionality:
             assert result["method"] == "add-after-eof"
             assert result["position"] == "bottom-right"
     
-    @pytest.mark.xfail
     def test_read_watermark_no_auth(self, client: FlaskClient):
         """Test watermark reading without authentication."""
         read_data = {
@@ -322,7 +310,6 @@ class TestWatermarkingFunctionality:
         result = response.get_json()
         assert "error" in result
     
-    @pytest.mark.xfail
     def test_read_watermark_missing_fields(self, client: FlaskClient, app: Flask):
         """Test watermark reading with missing required fields."""
         from itsdangerous import URLSafeTimedSerializer
@@ -346,7 +333,6 @@ class TestWatermarkingFunctionality:
             assert "error" in result
             assert "required" in result["error"]
     
-    @pytest.mark.xfail
     def test_read_watermark_document_not_found(self, client: FlaskClient, app: Flask):
         """Test watermark reading for non-existent document."""
         from itsdangerous import URLSafeTimedSerializer
@@ -359,25 +345,26 @@ class TestWatermarkingFunctionality:
             "key": "encryption-key-456"
         }
         
-        with patch('sqlalchemy.create_engine') as mock_create_engine:
-            mock_conn = MagicMock()
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            mock_engine.connect.return_value.__enter__.return_value = mock_conn
-            
-            # Mock document not found
-            mock_conn.execute.return_value.first.return_value = None
-            
-            response = client.post("/api/read-watermark/999", 
-                                 json=read_data, 
-                                 headers=headers)
-            
-            assert response.status_code == 404
-            result = response.get_json()
-            assert "error" in result
-            assert "not found" in result["error"]
+        # Use the mock engine from conftest.py
+        mock_engine = app.config['mock_db_engine']
+        mock_conn = app.config['mock_db_conn']
+        
+        # Reset mock state completely
+        mock_conn.reset_mock()
+        mock_engine.reset_mock()
+        
+        # Mock document not found
+        mock_conn.execute.return_value.first.return_value = None
+        
+        response = client.post("/api/read-watermark/999", 
+                             json=read_data, 
+                             headers=headers)
+        
+        assert response.status_code == 404
+        result = response.get_json()
+        assert "error" in result
+        assert "not found" in result["error"]
     
-    @pytest.mark.xfail
     def test_read_watermark_error(self, client: FlaskClient, app: Flask):
         """Test watermark reading when extraction fails."""
         from itsdangerous import URLSafeTimedSerializer
@@ -390,17 +377,15 @@ class TestWatermarkingFunctionality:
             "key": "wrong-key-456"
         }
         
-        with patch('sqlalchemy.create_engine') as mock_create_engine, \
-             patch('pathlib.Path.is_absolute', return_value=False), \
+        with patch('pathlib.Path.is_absolute', return_value=False), \
              patch('pathlib.Path.resolve') as mock_resolve, \
              patch('pathlib.Path.relative_to'), \
              patch('pathlib.Path.exists', return_value=True), \
              patch('watermarking_utils.read_watermark', side_effect=Exception("Invalid key")):
             
-            mock_conn = MagicMock()
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            mock_engine.connect.return_value.__enter__.return_value = mock_conn
+            # Use the mock engine from conftest.py
+            mock_engine = app.config['mock_db_engine']
+            mock_conn = app.config['mock_db_conn']
             
             # Mock document lookup
             mock_doc = MagicMock()
@@ -420,7 +405,6 @@ class TestWatermarkingFunctionality:
             assert "error" in result
             assert "Error when attempting to read watermark" in result["error"]
     
-    @pytest.mark.xfail
     def test_list_versions_success(self, client: FlaskClient, app: Flask):
         """Test successful version listing."""
         from itsdangerous import URLSafeTimedSerializer
@@ -428,33 +412,34 @@ class TestWatermarkingFunctionality:
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
         
-        with patch('sqlalchemy.create_engine') as mock_create_engine:
-            mock_conn = MagicMock()
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            mock_engine.connect.return_value.__enter__.return_value = mock_conn
-            
-            # Mock version list
-            mock_versions = [
-                MagicMock(id=1, documentid=1, link="abc123", intended_for="john@example.com", 
-                         secret="secret1", method="add-after-eof"),
-                MagicMock(id=2, documentid=1, link="def456", intended_for="jane@example.com", 
-                         secret="secret2", method="add-after-eof")
-            ]
-            mock_conn.execute.return_value.all.return_value = mock_versions
-            
-            response = client.get("/api/list-versions/1", headers=headers)
-            
-            assert response.status_code == 200
-            result = response.get_json()
-            assert "versions" in result
-            assert len(result["versions"]) == 2
-            assert result["versions"][0]["id"] == 1
-            assert result["versions"][0]["intended_for"] == "john@example.com"
-            assert result["versions"][1]["id"] == 2
-            assert result["versions"][1]["intended_for"] == "jane@example.com"
+        # Use the mock engine from conftest.py
+        mock_engine = app.config['mock_db_engine']
+        mock_conn = app.config['mock_db_conn']
+        
+        # Reset mock state completely
+        mock_conn.reset_mock()
+        mock_engine.reset_mock()
+        
+        # Mock version list
+        mock_versions = [
+            MagicMock(id=1, documentid=1, link="abc123", intended_for="john@example.com", 
+                     secret="secret1", method="add-after-eof"),
+            MagicMock(id=2, documentid=1, link="def456", intended_for="jane@example.com", 
+                     secret="secret2", method="add-after-eof")
+        ]
+        mock_conn.execute.return_value.all.return_value = mock_versions
+        
+        response = client.get("/api/list-versions/1", headers=headers)
+        
+        assert response.status_code == 200
+        result = response.get_json()
+        assert "versions" in result
+        assert len(result["versions"]) == 2
+        assert result["versions"][0]["id"] == 1
+        assert result["versions"][0]["intended_for"] == "john@example.com"
+        assert result["versions"][1]["id"] == 2
+        assert result["versions"][1]["intended_for"] == "jane@example.com"
     
-    @pytest.mark.xfail
     def test_list_versions_no_auth(self, client: FlaskClient):
         """Test version listing without authentication."""
         response = client.get("/api/list-versions/1")
@@ -463,7 +448,6 @@ class TestWatermarkingFunctionality:
         result = response.get_json()
         assert "error" in result
     
-    @pytest.mark.xfail
     def test_list_all_versions_success(self, client: FlaskClient, app: Flask):
         """Test successful listing of all versions for user."""
         from itsdangerous import URLSafeTimedSerializer
@@ -471,48 +455,47 @@ class TestWatermarkingFunctionality:
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
         
-        with patch('sqlalchemy.create_engine') as mock_create_engine:
-            mock_conn = MagicMock()
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            mock_engine.connect.return_value.__enter__.return_value = mock_conn
-            
-            # Mock version list across all documents
-            mock_versions = [
-                MagicMock(id=1, documentid=1, link="abc123", intended_for="john@example.com", 
-                         method="add-after-eof"),
-                MagicMock(id=2, documentid=1, link="def456", intended_for="jane@example.com", 
-                         method="add-after-eof"),
-                MagicMock(id=3, documentid=2, link="ghi789", intended_for="bob@example.com", 
-                         method="text-overlay")
-            ]
-            mock_conn.execute.return_value.all.return_value = mock_versions
-            
-            response = client.get("/api/list-all-versions", headers=headers)
-            
-            assert response.status_code == 200
-            result = response.get_json()
-            assert "versions" in result
-            assert len(result["versions"]) == 3
-            assert result["versions"][0]["documentid"] == 1
-            assert result["versions"][2]["documentid"] == 2
+        # Use the mock engine from conftest.py
+        mock_engine = app.config['mock_db_engine']
+        mock_conn = app.config['mock_db_conn']
+        
+        # Reset mock state completely
+        mock_conn.reset_mock()
+        mock_engine.reset_mock()
+        
+        # Mock version list across all documents
+        mock_versions = [
+            MagicMock(id=1, documentid=1, link="abc123", intended_for="john@example.com", 
+                     method="add-after-eof"),
+            MagicMock(id=2, documentid=1, link="def456", intended_for="jane@example.com", 
+                     method="add-after-eof"),
+            MagicMock(id=3, documentid=2, link="ghi789", intended_for="bob@example.com", 
+                     method="text-overlay")
+        ]
+        mock_conn.execute.return_value.all.return_value = mock_versions
+        
+        response = client.get("/api/list-all-versions", headers=headers)
+        
+        assert response.status_code == 200
+        result = response.get_json()
+        assert "versions" in result
+        assert len(result["versions"]) == 3
+        assert result["versions"][0]["documentid"] == 1
+        assert result["versions"][2]["documentid"] == 2
     
-    @pytest.mark.xfail
-    def test_get_version_success(self, client: FlaskClient):
+    def test_get_version_success(self, client: FlaskClient, app: Flask):
         """Test successful version retrieval by link."""
         test_pdf_content = b"%PDF-1.4\nwatermarked content\n%%EOF"
         
-        with patch('sqlalchemy.create_engine') as mock_create_engine, \
-             patch('pathlib.Path.exists', return_value=True), \
+        with patch('pathlib.Path.exists', return_value=True), \
              patch('pathlib.Path.resolve') as mock_resolve, \
              patch('pathlib.Path.relative_to'), \
              patch('pathlib.Path.stat') as mock_stat, \
-             patch('flask.send_file') as mock_send_file:
+             patch('werkzeug.utils.send_file') as mock_send_file:
             
-            mock_conn = MagicMock()
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            mock_engine.connect.return_value.__enter__.return_value = mock_conn
+            # Use the mock engine from conftest.py
+            mock_engine = app.config['mock_db_engine']
+            mock_conn = app.config['mock_db_conn']
             
             # Mock version data
             mock_version = MagicMock()
@@ -527,29 +510,29 @@ class TestWatermarkingFunctionality:
             
             response = client.get("/api/get-version/abc123")
             
-            # send_file should be called
-            mock_send_file.assert_called_once()
+            # Should return 200 status code
+            assert response.status_code == 200
     
-    @pytest.mark.xfail
-    def test_get_version_not_found(self, client: FlaskClient):
+    def test_get_version_not_found(self, client: FlaskClient, app: Flask):
         """Test version retrieval for non-existent link."""
-        with patch('sqlalchemy.create_engine') as mock_create_engine:
-            mock_conn = MagicMock()
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            mock_engine.connect.return_value.__enter__.return_value = mock_conn
-            
-            # Mock version not found
-            mock_conn.execute.return_value.first.return_value = None
-            
-            response = client.get("/api/get-version/nonexistent")
-            
-            assert response.status_code == 404
-            result = response.get_json()
-            assert "error" in result
-            assert "not found" in result["error"]
+        # Use the mock engine from conftest.py
+        mock_engine = app.config['mock_db_engine']
+        mock_conn = app.config['mock_db_conn']
+        
+        # Reset mock state completely
+        mock_conn.reset_mock()
+        mock_engine.reset_mock()
+        
+        # Mock version not found
+        mock_conn.execute.return_value.first.return_value = None
+        
+        response = client.get("/api/get-version/nonexistent")
+        
+        assert response.status_code == 404
+        result = response.get_json()
+        assert "error" in result
+        assert "not found" in result["error"]
     
-    @pytest.mark.xfail
     def test_complete_watermarking_workflow(self, client: FlaskClient, app: Flask):
         """Test complete watermarking workflow: create -> list -> get -> read."""
         from itsdangerous import URLSafeTimedSerializer
@@ -568,8 +551,15 @@ class TestWatermarkingFunctionality:
         test_pdf_content = b"%PDF-1.4\noriginal content\n%%EOF"
         watermarked_content = b"%PDF-1.4\noriginal content\nwatermarked\n%%EOF"
         
-        with patch('sqlalchemy.create_engine') as mock_create_engine, \
-             patch('pathlib.Path.is_absolute', return_value=False), \
+        # Use the mock engine from conftest.py
+        mock_engine = app.config['mock_db_engine']
+        mock_conn = app.config['mock_db_conn']
+        
+        # Reset mock state completely
+        mock_conn.reset_mock()
+        mock_engine.reset_mock()
+        
+        with patch('pathlib.Path.is_absolute', return_value=False), \
              patch('pathlib.Path.resolve') as mock_resolve, \
              patch('pathlib.Path.relative_to'), \
              patch('pathlib.Path.exists', return_value=True), \
@@ -579,13 +569,7 @@ class TestWatermarkingFunctionality:
              patch('watermarking_utils.is_watermarking_applicable', return_value=True), \
              patch('watermarking_utils.apply_watermark', return_value=watermarked_content), \
              patch('watermarking_utils.read_watermark', return_value="confidential-info-123"), \
-             patch('flask.send_file') as mock_send_file:
-            
-            mock_conn = MagicMock()
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            mock_engine.connect.return_value.__enter__.return_value = mock_conn
-            mock_engine.begin.return_value.__enter__.return_value = mock_conn
+             patch('werkzeug.utils.send_file') as mock_send_file:
             
             mock_resolve.return_value = Path("/storage/files/testuser/test.pdf")
             mock_stat.return_value.st_mtime = 1640995200.0
@@ -596,11 +580,7 @@ class TestWatermarkingFunctionality:
             mock_doc.id = 1
             mock_doc.name = "test.pdf"
             mock_doc.path = "files/testuser/test.pdf"
-            mock_conn.execute.side_effect = [
-                mock_doc,  # Document lookup
-                None,  # INSERT version
-                MagicMock(scalar=lambda: 1)  # LAST_INSERT_ID
-            ]
+            mock_conn.execute.return_value.first.return_value = mock_doc
             
             create_response = client.post("/api/create-watermark/1", 
                                         json=watermark_data, 
@@ -630,7 +610,7 @@ class TestWatermarkingFunctionality:
             mock_conn.execute.return_value.first.return_value = mock_version
             
             get_response = client.get(f"/api/get-version/{version_link}")
-            mock_send_file.assert_called()
+            assert get_response.status_code == 200
             
             # Step 4: Read watermark
             read_data = {

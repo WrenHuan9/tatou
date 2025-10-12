@@ -15,121 +15,124 @@ from flask.testing import FlaskClient
 class TestGeneralAPI:
     """Test general API functionality."""
 
-    @pytest.mark.xfail
-    def test_health_check_success(self, client: FlaskClient):
+    def test_health_check_success(self, client: FlaskClient, app):
         """Test successful health check with database connection."""
-        with patch('sqlalchemy.create_engine') as mock_create_engine:
-            mock_conn = MagicMock()
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            mock_engine.connect.return_value.__enter__.return_value = mock_conn
-            
-            # Mock successful database query - this should be called
-            mock_conn.execute.return_value = None
-            
-            response = client.get("/healthz")
+        mock_engine = app.config['mock_db_engine']
+        mock_conn = app.config['mock_db_conn']
 
-            # Verify the database connection was attempted
-            mock_create_engine.assert_called_once()
-            mock_engine.connect.assert_called_once()
-            mock_conn.execute.assert_called_once()
-            
-            # Verify the SQL query was the expected one
-            call_args = mock_conn.execute.call_args[0]
-            assert len(call_args) == 1
-            # The argument should be a sqlalchemy.text object containing "SELECT 1"
-            assert "SELECT 1" in str(call_args[0])
-            
-            # Verify the response
-            assert response.status_code == 200
-            result = response.get_json()
-            assert "message" in result
-            assert "The server is up and running" in result["message"]
-            assert "db_connected" in result
-            assert result["db_connected"] is True
-    
-    @pytest.mark.xfail
-    def test_health_check_db_failure(self, client: FlaskClient):
+        mock_engine.reset_mock()
+        mock_conn.reset_mock()
+
+        # Mock successful database query
+        mock_conn.execute.return_value = None
+
+        response = client.get("/healthz")
+
+        # Verify the database connection was attempted
+        mock_engine.connect.assert_called_once()
+        mock_conn.execute.assert_called_once()
+
+        # Verify the SQL query was the expected one
+        call_args = mock_conn.execute.call_args[0]
+        assert len(call_args) == 1
+        assert "SELECT 1" in str(call_args[0])
+
+        # Verify the response
+        assert response.status_code == 200
+        result = response.get_json()
+        assert "message" in result
+        assert "The server is up and running" in result["message"]
+        assert "db_connected" in result
+        assert result["db_connected"] is True
+
+    def test_health_check_db_failure(self, client: FlaskClient, app):
         """Test health check when database connection fails."""
-        with patch('sqlalchemy.create_engine') as mock_create_engine:
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            
-            # Mock database connection failure
-            mock_engine.connect.side_effect = Exception("Database connection failed")
-            
-            response = client.get("/healthz")
-            
-            # Verify the database connection was attempted
-            mock_create_engine.assert_called_once()
-            mock_engine.connect.assert_called_once()
-            
-            # Verify the response shows db failure but server is still up
-            assert response.status_code == 200
-            result = response.get_json()
-            assert "message" in result
-            assert "The server is up and running" in result["message"]
-            assert "db_connected" in result
-            assert result["db_connected"] is False
-    
-    @pytest.mark.xfail
-    def test_health_check_sql_execution_failure(self, client: FlaskClient):
+        mock_engine = app.config['mock_db_engine']
+
+        mock_engine.reset_mock()
+
+        # Mock database connection failure
+        mock_engine.connect.side_effect = Exception("Database connection failed")
+
+        response = client.get("/healthz")
+
+        # Verify the database connection was attempted
+        mock_engine.connect.assert_called_once()
+
+        # Verify the response shows db failure but server is still up
+        assert response.status_code == 200
+        result = response.get_json()
+        assert "message" in result
+        assert "The server is up and running" in result["message"]
+        assert "db_connected" in result
+        assert result["db_connected"] is False
+
+        mock_engine.connect.side_effect = None
+
+    def test_health_check_sql_execution_failure(self, client: FlaskClient, app):
         """Test health check when SQL execution fails but connection succeeds."""
-        with patch('sqlalchemy.create_engine') as mock_create_engine:
-            mock_conn = MagicMock()
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            mock_engine.connect.return_value.__enter__.return_value = mock_conn
-            
-            # Mock successful connection but failed SQL execution
-            mock_conn.execute.side_effect = Exception("SQL execution failed")
-            
-            response = client.get("/healthz")
-            
-            # Verify the database connection and query were attempted
-            mock_create_engine.assert_called_once()
-            mock_engine.connect.assert_called_once()
-            mock_conn.execute.assert_called_once()
-            
-            # Verify the SQL query was the expected one
-            call_args = mock_conn.execute.call_args[0]
-            assert len(call_args) == 1
-            assert "SELECT 1" in str(call_args[0])
-            
-            # Verify the response shows db failure
-            assert response.status_code == 200
-            result = response.get_json()
-            assert "message" in result
-            assert "The server is up and running" in result["message"]
-            assert "db_connected" in result
-            assert result["db_connected"] is False
-    
-    @pytest.mark.xfail
+        mock_engine = app.config['mock_db_engine']
+        mock_conn = app.config['mock_db_conn']
+
+        mock_engine.reset_mock()
+        mock_conn.reset_mock()
+
+        # Mock successful connection but failed SQL execution
+        mock_conn.execute.side_effect = Exception("SQL execution failed")
+
+        response = client.get("/healthz")
+
+        # Verify the database connection and query were attempted
+        mock_engine.connect.assert_called_once()
+        mock_conn.execute.assert_called_once()
+
+        # Verify the SQL query was the expected one
+        call_args = mock_conn.execute.call_args[0]
+        assert len(call_args) == 1
+        assert "SELECT 1" in str(call_args[0])
+
+        # Verify the response shows db failure
+        assert response.status_code == 200
+        result = response.get_json()
+        assert "message" in result
+        assert "The server is up and running" in result["message"]
+        assert "db_connected" in result
+        assert result["db_connected"] is False
+
+        mock_conn.execute.side_effect = None
+
     def test_health_check_with_cached_engine(self, client: FlaskClient, app: Flask):
         """Test health check with engine caching behavior."""
-        with patch('sqlalchemy.create_engine') as mock_create_engine:
+        with patch('server.src.server.create_engine') as mock_create_engine:
+            app.config['_ENGINE'] = None
+
             mock_conn = MagicMock()
             mock_engine = MagicMock()
             mock_create_engine.return_value = mock_engine
-            mock_engine.connect.return_value.__enter__.return_value = mock_conn
+
+            mock_context = MagicMock()
+            mock_context.__enter__ = MagicMock(return_value=mock_conn)
+            mock_context.__exit__ = MagicMock(return_value=False)
+            mock_engine.connect.return_value = mock_context
+
             mock_conn.execute.return_value = None
-            
+
             # First call should create engine
             response1 = client.get("/healthz")
             assert response1.status_code == 200
             assert response1.get_json()["db_connected"] is True
-            
+
             # Second call should use cached engine (create_engine called only once)
             response2 = client.get("/healthz")
             assert response2.status_code == 200
             assert response2.get_json()["db_connected"] is True
-            
+
             # Verify create_engine was called only once due to caching
             mock_create_engine.assert_called_once()
             # But connect and execute should be called twice
             assert mock_engine.connect.call_count == 2
             assert mock_conn.execute.call_count == 2
-    
+
     def test_home_page(self, client: FlaskClient):
         """Test home page serves static file."""
         with patch.object(client.application, 'send_static_file') as mock_send_static:
@@ -181,7 +184,7 @@ class TestGeneralAPI:
         # Should return 404 or be handled by static file handler
         assert response.status_code in [404, 500]  # 500 if static file handler fails
     
-    @pytest.mark.xfail
+
     def test_invalid_method_on_endpoint(self, client: FlaskClient):
         """Test using invalid HTTP method on endpoints."""
         # Test invalid methods on various endpoints
@@ -283,8 +286,7 @@ class TestGeneralAPI:
             assert response.status_code == 200
         
         # Note: If rate limiting is implemented, some requests might return 429
-    
-    @pytest.mark.xfail
+
     def test_request_size_limits(self, client: FlaskClient):
         """Test request size limits."""
         # Test with very large JSON payload

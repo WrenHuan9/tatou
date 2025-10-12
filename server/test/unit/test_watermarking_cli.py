@@ -812,8 +812,7 @@ class TestMainFunction:
 
 class TestIntegrationScenarios:
     """Test integration scenarios and edge cases."""
-    
-    @pytest.mark.xfail
+
     @patch('watermarking_cli.is_watermarking_applicable')
     @patch('watermarking_cli.apply_watermark')
     @patch('watermarking_cli._read_text_from_file')
@@ -821,61 +820,60 @@ class TestIntegrationScenarios:
     def test_embed_with_file_inputs(self, mock_getpass, mock_read_file, mock_apply, mock_applicable, capsys):
         """Test embed command with file-based secret and key inputs."""
         mock_getpass.return_value = "prompted-key"
-        mock_read_file.side_effect = ["file-secret", "file-key\n"]
+        mock_read_file.side_effect = ["file-key\n", "file-secret"]
         mock_applicable.return_value = True
         mock_apply.return_value = b"watermarked-content"
-        
-        with tempfile.NamedTemporaryFile(delete=False) as f:
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as f:
             output_path = f.name
-        
+
         try:
             result = main([
                 'embed', 'input.pdf', output_path,
                 '--secret-file', 'secret.txt',
                 '--key-file', 'key.txt'
             ])
-            
+
             assert result == 0
-            # Verify file operations
             assert mock_read_file.call_count == 2
             mock_read_file.assert_any_call('secret.txt')
             mock_read_file.assert_any_call('key.txt')
-            
-            # Verify watermarking
+
+
             mock_apply.assert_called_once_with(
                 method='toy-eof',
                 pdf='input.pdf',
                 secret='file-secret',
-                key='file-key',  # Should be stripped
+                key='file-key',
                 position=None
             )
         finally:
-            Path(output_path).unlink()
-    
+            Path(output_path).unlink(missing_ok=True)
+
     @patch('watermarking_cli.read_watermark')
     @patch('watermarking_cli._read_text_from_stdin')
     def test_extract_with_stdin_key(self, mock_stdin, mock_read, capsys):
         """Test extract command with stdin key input."""
         mock_stdin.return_value = "stdin-key\n\r"
         mock_read.return_value = "extracted-secret"
-        
+
         result = main([
             'extract', 'watermarked.pdf',
             '--method', 'custom-method',
             '--key-stdin'
         ])
-        
+
         assert result == 0
         mock_stdin.assert_called_once()
         mock_read.assert_called_once_with(
             method='custom-method',
             pdf='watermarked.pdf',
-            key='stdin-key'  # Should be stripped
+            key='stdin-key'
         )
-        
+
         captured = capsys.readouterr()
         assert "extracted-secret" in captured.out
-    
+
     @patch('watermarking_cli.explore_pdf')
     def test_explore_with_complex_output(self, mock_explore, capsys):
         """Test explore command with complex nested output."""
@@ -889,20 +887,19 @@ class TestIntegrationScenarios:
                 "author": "Test Author"
             }
         }
-        
+
         result = main(['explore', 'complex.pdf'])
-        
+
         assert result == 0
         captured = capsys.readouterr()
-        
-        # Verify JSON structure in output
-        output_data = json.loads(captured.out.strip())
+
+        output_text = captured.out.strip()
+        output_data = json.loads(output_text)
         assert len(output_data["pages"]) == 2
         assert output_data["metadata"]["title"] == "Test Document"
-    
+
     def test_error_propagation_through_main(self, capsys):
         """Test that various errors are properly caught and return correct exit codes."""
-        # Test each error type through the main function
         test_cases = [
             (FileNotFoundError("File not found"), 2, "error:"),
             (ValueError("Bad value"), 2, "error:"),
@@ -910,12 +907,13 @@ class TestIntegrationScenarios:
             (InvalidKeyError("Bad key"), 4, "invalid key:"),
             (WatermarkingError("Watermark failed"), 5, "watermarking error:")
         ]
-        
+
         for exception, expected_code, expected_output in test_cases:
-            with patch('watermarking_cli.cmd_methods', side_effect=exception):
+            with patch('watermarking_cli.cmd_methods') as mock_cmd:
+                mock_cmd.side_effect = exception
                 result = main(['methods'])
                 assert result == expected_code
-                
+
                 captured = capsys.readouterr()
                 assert expected_output in captured.err
 
