@@ -261,7 +261,7 @@ class TestCompleteAuthenticationFlow:
     def test_token_authentication(self, client: FlaskClient, app: Flask):
         """Test token-based authentication."""
         # Create a valid token
-        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
+        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
         token_data = {"uid": 1, "login": "testuser", "email": "test@example.com"}
         valid_token = serializer.dumps(token_data)
 
@@ -311,7 +311,7 @@ class TestDocumentManagement:
         """Helper method to create a valid token."""
         serializer = URLSafeTimedSerializer(
             app.config["SECRET_KEY"],
-            salt="tatou-auth"
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
         )
         token_data = {"uid": 1, "login": "testuser", "email": "test@example.com"}
         return serializer.dumps(token_data)
@@ -585,13 +585,126 @@ class TestDocumentManagement:
         data = response.get_json()
         assert "error" in data
 
+    def test_delete_versions_query_db_error_returns_503(self, client: FlaskClient, app: Flask, tmp_path: Path):
+        token = self._get_valid_token(app)
+        headers = {"Authorization": f"Bearer {token}"}
+        app.config["STORAGE_DIR"] = tmp_path
+
+        mock_engine = app.config.get('_ENGINE')
+
+        conn1 = MagicMock()
+        ctx1 = MagicMock()
+        ctx1.__enter__.return_value = conn1
+        ctx1.__exit__.return_value = False
+
+        conn2 = MagicMock()
+        conn2.execute.side_effect = Exception("versions query failed")
+        ctx2 = MagicMock()
+        ctx2.__enter__.return_value = conn2
+        ctx2.__exit__.return_value = False
+
+        mock_engine.connect.side_effect = [ctx1, ctx2]
+
+        doc_row = MagicMock()
+        doc_row.id = 1
+        doc_row.path = str(tmp_path / "files" / "testuser" / "doc.pdf")
+        conn1.execute.return_value.first.return_value = doc_row
+
+        resp = client.delete("/api/delete-document/1", headers=headers)
+        assert resp.status_code == 503
+        assert "error" in resp.get_json()
+
+    def test_delete_version_file_unlink_error_sets_issue_flag(self, client: FlaskClient, app: Flask, tmp_path: Path):
+        token = self._get_valid_token(app)
+        headers = {"Authorization": f"Bearer {token}"}
+        app.config["STORAGE_DIR"] = tmp_path
+
+        versions_dir = tmp_path / "files" / "testuser" / "watermarks"
+        versions_dir.mkdir(parents=True, exist_ok=True)
+        version_file = versions_dir / "v1.pdf"
+        version_file.write_bytes(b"%PDF-1.4\n%%EOF")
+
+        original_path = tmp_path / "files" / "testuser" / "doc.pdf"
+
+        mock_engine = app.config.get('_ENGINE')
+
+        conn_read = MagicMock()
+        ctx_read = MagicMock()
+        ctx_read.__enter__.return_value = conn_read
+        ctx_read.__exit__.return_value = False
+
+        conn_versions = MagicMock()
+        ctx_versions = MagicMock()
+        ctx_versions.__enter__.return_value = conn_versions
+        ctx_versions.__exit__.return_value = False
+
+        conn_write = MagicMock()
+        ctx_write = MagicMock()
+        ctx_write.__enter__.return_value = conn_write
+        ctx_write.__exit__.return_value = False
+
+        mock_engine.connect.side_effect = [ctx_read, ctx_versions]
+        mock_engine.begin.return_value = ctx_write
+
+        doc_row = MagicMock()
+        doc_row.id = 1
+        doc_row.path = str(original_path)
+        conn_read.execute.return_value.first.return_value = doc_row
+
+        version_row = MagicMock()
+        version_row.id = 11
+        version_row.path = str(version_file)
+        conn_versions.execute.return_value.fetchall.return_value = [version_row]
+
+        with patch('pathlib.Path.unlink', side_effect=Exception('unlink error')), patch('pathlib.Path.exists', side_effect=lambda p=version_file: True if str(p) == str(version_file) else False):
+            resp = client.delete("/api/delete-document/1", headers=headers)
+
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["deleted"] is True
+        assert body["has_file_issues"] is True
+
+    def test_delete_db_error_returns_503(self, client: FlaskClient, app: Flask, tmp_path: Path):
+        token = self._get_valid_token(app)
+        headers = {"Authorization": f"Bearer {token}"}
+        app.config["STORAGE_DIR"] = tmp_path
+
+        mock_engine = app.config.get('_ENGINE')
+
+        conn_read = MagicMock()
+        ctx_read = MagicMock()
+        ctx_read.__enter__.return_value = conn_read
+        ctx_read.__exit__.return_value = False
+        mock_engine.connect.return_value = ctx_read
+
+        conn_write = MagicMock()
+        conn_write.execute.side_effect = Exception("delete failed")
+        ctx_write = MagicMock()
+        ctx_write.__enter__.return_value = conn_write
+        ctx_write.__exit__.return_value = False
+        mock_engine.begin.return_value = ctx_write
+
+        doc_row = MagicMock()
+        doc_row.id = 1
+        doc_row.path = str(tmp_path / "files" / "testuser" / "doc.pdf")
+        conn_read.execute.side_effect = [
+            MagicMock(first=lambda: doc_row),
+            MagicMock(fetchall=lambda: []),
+        ]
+
+        with patch('pathlib.Path.exists', return_value=False):
+            resp = client.delete("/api/delete-document/1", headers=headers)
+
+        assert resp.status_code == 503
+        assert "error" in resp.get_json()
+
 @pytest.mark.integration
 class TestWatermarkManagement:
     """Test complete watermark management workflow."""
 
     def _get_valid_token(self, app: Flask) -> str:
         """Helper method to create a valid token."""
-        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
+        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
         token_data = {"uid": 1, "login": "testuser", "email": "test@example.com"}
         return serializer.dumps(token_data)
 
@@ -714,6 +827,26 @@ class TestWatermarkManagement:
         data = response.get_json()
         assert "error" in data
         assert "not found" in data["error"].lower()
+
+    def test_create_watermark_invalid_id_from_query_returns_400(self, client: FlaskClient, app: Flask, tmp_path: Path):
+        token = self._get_valid_token(app)
+        headers = {"Authorization": f"Bearer {token}"}
+        app.config["STORAGE_DIR"] = tmp_path
+
+        payload = {"method": "m", "intended_for": "a@b", "secret": "s", "key": "k"}
+        resp = client.post("/api/create-watermark?id=abc", headers=headers, json=payload)
+        assert resp.status_code == 400
+        assert "document_id (int) is required" in resp.get_json().get("error", "")
+
+    def test_create_watermark_invalid_id_from_body_returns_400(self, client: FlaskClient, app: Flask, tmp_path: Path):
+        token = self._get_valid_token(app)
+        headers = {"Authorization": f"Bearer {token}"}
+        app.config["STORAGE_DIR"] = tmp_path
+
+        payload = {"id": "not-an-int", "method": "m", "intended_for": "a@b", "secret": "s", "key": "k"}
+        resp = client.post("/api/create-watermark", headers=headers, json=payload)
+        assert resp.status_code == 400
+        assert "document_id (int) is required" in resp.get_json().get("error", "")
 
     def test_list_versions_success(self, client: FlaskClient, app: Flask):
         """Test successful version listing."""
@@ -1500,7 +1633,7 @@ class TestErrorHandlingAndEdgeCases:
 
     def test_file_system_errors(self, client: FlaskClient, app: Flask, sample_pdf_bytes: bytes):
         """Test handling of file system errors."""
-        token = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth").dumps({
+        token = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6").dumps({
             "uid": 1, "login": "testuser", "email": "test@example.com"
         })
         headers = {"Authorization": f"Bearer {token}"}
@@ -1535,7 +1668,7 @@ class TestErrorHandlingAndEdgeCases:
         """Helper method to create a valid token."""
         serializer = URLSafeTimedSerializer(
             app.config["SECRET_KEY"],
-            salt="tatou-auth"
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
         )
         token_data = {"uid": 1, "login": "testuser", "email": "test@example.com"}
         return serializer.dumps(token_data)
@@ -1589,7 +1722,7 @@ class TestErrorHandlingAndEdgeCases:
 
     def test_large_file_handling(self, client: FlaskClient, app: Flask):
         """Test handling of large file uploads."""
-        token = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth").dumps({
+        token = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6").dumps({
             "uid": 1, "login": "testuser", "email": "test@example.com"
         })
         headers = {"Authorization": f"Bearer {token}"}
@@ -1625,7 +1758,7 @@ class TestErrorHandlingAndEdgeCases:
 
     def test_concurrent_operations(self, client: FlaskClient, app: Flask):
         """Test handling of concurrent operations."""
-        token = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth").dumps({
+        token = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6").dumps({
             "uid": 1, "login": "testuser", "email": "test@example.com"
         })
         headers = {"Authorization": f"Bearer {token}"}

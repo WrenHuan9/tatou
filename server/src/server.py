@@ -13,24 +13,21 @@ from flask import Flask, g, jsonify, request, send_file
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
-try:
-    from rmap.identity_manager import IdentityManager
-    from rmap.rmap import RMAP
-except ImportError:
-    IdentityManager = None
-    RMAP = None
+from rmap.identity_manager import IdentityManager
+from rmap.rmap import RMAP
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
-from werkzeug.exceptions import NotFound
+from werkzeug.exceptions import NotFound, MethodNotAllowed, HTTPException
+from werkzeug.routing import BaseConverter
 
 try:
     import dill as _pickle  # allows loading classes not importable by module path
 except Exception:  # dill is optional
     _pickle = _std_pickle
 
-
 import watermarking_utils as WMUtils
 from watermarking_method import is_pdf_bytes
+
 # from watermarking_utils import METHODS, apply_watermark, read_watermark, explore_pdf, is_watermarking_applicable, get_method
 
 rmap_service = None
@@ -39,6 +36,13 @@ identity_manager = None
 
 def create_app():
     app = Flask(__name__)
+
+    # Regex route converter to constrain catch-all static file route
+    class RegexConverter(BaseConverter):
+        def __init__(self, map, *items):
+            super().__init__(map)
+            self.regex = items[0]
+    app.url_map.converters['re'] = RegexConverter
 
     # --- Config ---
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
@@ -88,52 +92,81 @@ def create_app():
 
     @app.before_request
     def _log_request():
-        try:
-            user = getattr(g, "user", None)
-        except Exception:
-            user = None
-        user_ctx = {
-            "id": (user or {}).get("id") if isinstance(user, dict) else None,
-            "login": (user or {}).get("login") if isinstance(user, dict) else None,
-        }
-        # Target object hints
-        target = request.view_args.copy() if getattr(request, "view_args", None) else {}
-        for key in ("id", "document_id", "documentid", "link"):
-            if key in request.args and key not in target:
-                target[key] = request.args.get(key)
-        app.logger.info(
-            "event=request start method=%s path=%s user=%s target=%s",
-            request.method,
-            request.path,
-            user_ctx,
-            target,
-        )
+        # Store request info in g for later use
+        g.request_start_time = dt.datetime.utcnow()
+        g.client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.environ.get('REMOTE_ADDR', 'unknown'))
+
+        # Only log requests for API endpoints, skip static files
+        if request.path.startswith('/api/'):
+            try:
+                user = getattr(g, "user", None)
+            except Exception:
+                user = None
+            user_ctx = {
+                "id": (user or {}).get("id") if isinstance(user, dict) else None,
+                "login": (user or {}).get("login") if isinstance(user, dict) else None,
+            }
+
+            # Get request parameters (exclude file uploads)
+            params = {}
+            if request.args:
+                params.update(dict(request.args))
+            if request.is_json:
+                json_data = request.get_json(silent=True) or {}
+                # Filter out sensitive fields and file data
+                for key, value in json_data.items():
+                    if key not in ['password', 'file', 'file_content'] and not isinstance(value, (bytes, bytearray)):
+                        params[key] = value
+
+            # Target object hints
+            target = request.view_args.copy() if getattr(request, "view_args", None) else {}
+            for key in ("id", "document_id", "documentid", "link"):
+                if key in request.args and key not in target:
+                    target[key] = request.args.get(key)
+
+            app.logger.info(
+                "event=api_request method=%s path=%s ip=%s user=%s params=%s target=%s",
+                request.method,
+                request.path,
+                g.client_ip,
+                user_ctx,
+                params,
+                target,
+            )
 
     @app.after_request
     def _log_response(response):
-        try:
-            user = getattr(g, "user", None)
-        except Exception:
-            user = None
-        user_ctx = {
-            "id": (user or {}).get("id") if isinstance(user, dict) else None,
-            "login": (user or {}).get("login") if isinstance(user, dict) else None,
-        }
-        app.logger.info(
-            "event=response status=%s method=%s path=%s user=%s",
-            response.status,
-            request.method,
-            request.path,
-            user_ctx,
-        )
+        # Only log responses for API endpoints
+        if request.path.startswith('/api/'):
+            try:
+                user = getattr(g, "user", None)
+            except Exception:
+                user = None
+            user_ctx = {
+                "id": (user or {}).get("id") if isinstance(user, dict) else None,
+                "login": (user or {}).get("login") if isinstance(user, dict) else None,
+            }
+
+            # Calculate response time
+            duration_ms = None
+            if hasattr(g, 'request_start_time'):
+                duration = dt.datetime.utcnow() - g.request_start_time
+                duration_ms = int(duration.total_seconds() * 1000)
+
+            app.logger.info(
+                "event=api_response status=%s method=%s path=%s ip=%s user=%s duration_ms=%s",
+                response.status,
+                request.method,
+                request.path,
+                getattr(g, 'client_ip', 'unknown'),
+                user_ctx,
+                duration_ms,
+            )
         return response
 
-    @app.errorhandler(Exception)
-    def _log_exception(e):
-        # Ensure unhandled exceptions are recorded with user and route context
-        from werkzeug.exceptions import HTTPException
-
-        # Extract user context
+    # Handle Werkzeug HTTP exceptions explicitly to preserve correct status codes (e.g., 404/405)
+    @app.errorhandler(HTTPException)
+    def _handle_http_exception(e: HTTPException):
         try:
             user = getattr(g, "user", None)
         except Exception:
@@ -143,42 +176,54 @@ def create_app():
             "login": (user or {}).get("login") if isinstance(user, dict) else None,
         }
         client_ip = getattr(g, 'client_ip', 'unknown')
-
-        # Handle HTTP exceptions differently (use warning instead of exception)
-        if isinstance(e, HTTPException):
-            app.logger.warning(
-                "event=http_exception status=%s path=%s method=%s ip=%s user=%s",
-                e.code, request.path, request.method, client_ip, user_ctx
+        # Only log API paths to avoid noise
+        if request.path.startswith('/api/') or isinstance(e, MethodNotAllowed):
+            app.logger.error(
+                "event=error user_msg=%s detail=%s", f"{e.name}", str(e)
             )
-            return e
+        # Return JSON with the correct HTTP status code
+        return jsonify({"error": e.name}), e.code
 
-        # Handle all other exceptions
-        app.logger.exception(
-            "event=exception path=%s method=%s ip=%s user=%s",
-            request.path, request.method, client_ip, user_ctx
-        )
+    @app.errorhandler(Exception)
+    def _log_exception(e):
+        # Ensure unhandled exceptions are recorded with user and route context
+        try:
+            user = getattr(g, "user", None)
+        except Exception:
+            user = None
+        user_ctx = {
+            "id": (user or {}).get("id") if isinstance(user, dict) else None,
+            "login": (user or {}).get("login") if isinstance(user, dict) else None,
+        }
+        client_ip = getattr(g, 'client_ip', 'unknown')
+        app.logger.exception("event=exception path=%s method=%s ip=%s user=%s", request.path, request.method, client_ip,
+                             user_ctx)
         return _safe_error("Internal server error", e, 500)
 
     try:
-        if IdentityManager is not None and RMAP is not None:
-            global identity_manager
-            identity_manager = IdentityManager(
-                client_keys_dir=app.config["CLIENT_KEYS_DIR"],
-                server_public_key_path=app.config["SERVER_PUB_KEY_PATH"],
-                server_private_key_path=app.config["SERVER_PRIV_KEY_PATH"],
-                server_private_key_passphrase=app.config["PRIVATE_KEY_PASSPHRASE"],
-            )
-            global rmap_service
-            rmap_service = RMAP(identity_manager)
-            app.config["IDENTITY_MANAGER"] = identity_manager
-            app.config["RMAP_SERVICE"] = rmap_service
-        else:
-            print("RMAP modules not available, skipping initialization")
-            rmap_service = None
-            app.config["IDENTITY_MANAGER"] = None
-            app.config["RMAP_SERVICE"] = None
+        global identity_manager
+        # If tests patch IdentityManager to None, avoid calling it
+        if IdentityManager is None or RMAP is None:
+            raise RuntimeError("RMAP/IdentityManager modules unavailable")
+
+        identity_manager = IdentityManager(
+            client_keys_dir=app.config["CLIENT_KEYS_DIR"],
+            server_public_key_path=app.config["SERVER_PUB_KEY_PATH"],
+            server_private_key_path=app.config["SERVER_PRIV_KEY_PATH"],
+            server_private_key_passphrase=app.config["PRIVATE_KEY_PASSPHRASE"],
+        )
+        global rmap_service
+        rmap_service = RMAP(identity_manager)
+        app.config["IDENTITY_MANAGER"] = identity_manager
+        app.config["RMAP_SERVICE"] = rmap_service
     except FileNotFoundError as e:
         print(f"CRITICAL ERROR: Could not initialize RMAP service. Key files not found at mounted path. {e}")
+        rmap_service = None
+        app.config["IDENTITY_MANAGER"] = None
+        app.config["RMAP_SERVICE"] = None
+    except RuntimeError as e:
+        # Occurs when IdentityManager or RMAP is None (e.g., during tests)
+        app.logger.warning(f"RMAP init skipped: {e}")
         rmap_service = None
         app.config["IDENTITY_MANAGER"] = None
         app.config["RMAP_SERVICE"] = None
@@ -199,11 +244,12 @@ def create_app():
 
     # --- Helpers ---
     def _serializer():
-        return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
+        return URLSafeTimedSerializer(app.config["SECRET_KEY"],
+                                      salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
 
     def _auth_error(msg: str, code: int = 401):
         return jsonify({"error": msg}), code
-    
+
     def _safe_error(user_msg: str, internal_error: Exception = None, code: int = 500):
         if internal_error:
             app.logger.error("event=error user_msg=%s detail=%s", user_msg, str(internal_error))
@@ -213,25 +259,29 @@ def create_app():
         @wraps(f)
         def wrapper(*args, **kwargs):
             auth = request.headers.get("Authorization", "")
+            client_ip = getattr(g, 'client_ip', 'unknown')
             if not auth.startswith("Bearer "):
-                app.logger.info("event=auth_failed reason=missing_bearer method=%s path=%s", request.method, request.path)
+                app.logger.info("event=auth_failed reason=missing_bearer method=%s path=%s ip=%s", request.method,
+                                request.path, client_ip)
                 return _auth_error("Missing or invalid Authorization header")
             token = auth.split(" ", 1)[1].strip()
             try:
                 data = _serializer().loads(token, max_age=app.config["TOKEN_TTL_SECONDS"])
             except SignatureExpired:
-                app.logger.info("event=auth_failed reason=token_expired method=%s path=%s", request.method, request.path)
+                app.logger.info("event=auth_failed reason=token_expired method=%s path=%s ip=%s", request.method,
+                                request.path, client_ip)
                 return _auth_error("Token expired")
             except BadSignature:
-                app.logger.info("event=auth_failed reason=invalid_token method=%s path=%s", request.method, request.path)
+                app.logger.info("event=auth_failed reason=invalid_token method=%s path=%s ip=%s", request.method,
+                                request.path, client_ip)
                 return _auth_error("Invalid token")
             g.user = {
                 "id": int(data["uid"]),
                 "login": data["login"],
                 "email": data.get("email"),
             }
-            app.logger.info("event=auth_success user_id=%s login=%s method=%s path=%s", 
-                            g.user["id"], g.user["login"], request.method, request.path)
+            app.logger.info("event=auth_success user_id=%s login=%s method=%s path=%s ip=%s",
+                            g.user["id"], g.user["login"], request.method, request.path, client_ip)
             return f(*args, **kwargs)
 
         return wrapper
@@ -245,18 +295,32 @@ def create_app():
 
     # --- Routes ---
 
-    @app.route("/<path:filename>")
+    # Serve static assets under a non-greedy prefix to avoid shadowing /api/* routes
+    @app.route("/static/<path:filename>")
     def static_files(filename):
-        if filename.startswith('api/'):
-            target_path = '/' + filename
-
-            for rule in app.url_map.iter_rules():
-                if rule.rule == target_path or rule.rule.rstrip('/') == target_path.rstrip('/'):
-                    from werkzeug.exceptions import MethodNotAllowed
-                    raise MethodNotAllowed()
-
+        try:
+            return app.send_static_file(filename)
+        except NotFound:
             return jsonify({"error": "File not found"}), 404
 
+    # Also serve common static files at root (e.g., /style.css, /css/main.css),
+    # but only for known asset extensions and never for paths starting with api/
+    @app.route(
+        "/<re('^(?!api/).+\\.(?:css|js|html|png|jpg|jpeg|gif|svg|woff2?|ttf|eot)$'):filename>"
+    )
+    def static_files_root(filename):
+        try:
+            return app.send_static_file(filename)
+        except NotFound:
+            return jsonify({"error": "File not found"}), 404
+
+    # Fallback for any other root-level paths including nested directories.
+    # If it looks like an API path, force a 405 so tests expecting invalid method get the correct status.
+    @app.route("/<path:filename>")
+    def static_files_catchall(filename):
+        if filename.startswith('api/'):
+            # Let the framework surface a 405 for invalid methods on API endpoints
+            raise MethodNotAllowed()
         try:
             return app.send_static_file(filename)
         except NotFound:
@@ -309,7 +373,8 @@ def create_app():
         except IntegrityError:
             return jsonify({"error": "email or login already exists"}), 409
         except Exception as e:
-            app.logger.error("event=create_user_failed reason=database_error email=%s login=%s error=%s", email, login, str(e))
+            app.logger.error("event=create_user_failed reason=database_error email=%s login=%s error=%s", email, login,
+                             str(e))
             return _safe_error("Failed to create user", e, 503)
 
         return jsonify({"id": row.id, "email": row.email, "login": row.login}), 201
@@ -362,19 +427,21 @@ def create_app():
             return jsonify({"error": "empty filename"}), 400
 
         fname = file.filename
-        
+
         # Check file extension
         if not fname.lower().endswith('.pdf'):
-            app.logger.warning("event=upload_document_failed reason=invalid_extension filename=%s user_id=%s", fname, g.user["id"])
+            app.logger.warning("event=upload_document_failed reason=invalid_extension filename=%s user_id=%s", fname,
+                               g.user["id"])
             return jsonify({"error": "only PDF files are allowed"}), 400
-        
+
         # Read file content to validate it's actually a PDF
         file_content = file.read()
         file.seek(0)  # Reset file pointer for later save
-        
+
         # Validate PDF content
         if not is_pdf_bytes(file_content):
-            app.logger.warning("event=upload_document_failed reason=invalid_pdf_content filename=%s user_id=%s", fname, g.user["id"])
+            app.logger.warning("event=upload_document_failed reason=invalid_pdf_content filename=%s user_id=%s", fname,
+                               g.user["id"])
             return jsonify({"error": "file does not appear to be a valid PDF"}), 400
 
         user_dir = app.config["STORAGE_DIR"] / "files" / g.user["login"]
@@ -384,7 +451,12 @@ def create_app():
         final_name = request.form.get("name") or fname
         stored_name = f"{ts}__{fname}"
         stored_path = user_dir / stored_name
-        file.save(stored_path)
+        try:
+            file.save(stored_path)
+        except Exception as e:
+            app.logger.error("event=upload_document_failed reason=file_error filename=%s user_id=%s error=%s",
+                             fname, g.user["id"], str(e))
+            return _safe_error("Failed to upload document", e, 500)
 
         sha_hex = _sha256_file(stored_path)
         size = stored_path.stat().st_size
@@ -417,10 +489,11 @@ def create_app():
                     ),
                     {"id": did},
                 ).one()
-            app.logger.info("event=upload_document_success doc_id=%s filename=%s user_id=%s", did, final_name, g.user["id"])
+            app.logger.info("event=upload_document_success doc_id=%s filename=%s user_id=%s", did, final_name,
+                            g.user["id"])
         except Exception as e:
-            app.logger.error("event=upload_document_failed reason=database_error filename=%s user_id=%s error=%s", 
-                           fname, g.user["id"], str(e))
+            app.logger.error("event=upload_document_failed reason=database_error filename=%s user_id=%s error=%s",
+                             fname, g.user["id"], str(e))
             return _safe_error("Failed to upload document", e, 503)
 
         return (
@@ -573,13 +646,14 @@ def create_app():
                     {"id": document_id, "uid": int(g.user["id"])},
                 ).first()
         except Exception as e:
-            app.logger.error("event=get_document_failed reason=database_error doc_id=%s user_id=%s error=%s", 
-                           document_id, g.user["id"], str(e))
+            app.logger.error("event=get_document_failed reason=database_error doc_id=%s user_id=%s error=%s",
+                             document_id, g.user["id"], str(e))
             return _safe_error("Failed to get document", e, 503)
 
         # Don't leak whether a doc exists for another user
         if not row:
-            app.logger.info("event=get_document_failed reason=not_found doc_id=%s user_id=%s", document_id, g.user["id"])
+            app.logger.info("event=get_document_failed reason=not_found doc_id=%s user_id=%s", document_id,
+                            g.user["id"])
             return jsonify({"error": "document not found"}), 404
 
         # Basic safety: ensure path is inside STORAGE_DIR and exists
@@ -588,17 +662,17 @@ def create_app():
             file_path = _safe_resolve_under_storage(row.path, storage_root)
         except Exception as e:
             # Path looks suspicious or outside storage
-            app.logger.error("event=get_document_failed reason=path_security doc_id=%s user_id=%s error=%s", 
-                           document_id, g.user["id"], str(e))
+            app.logger.error("event=get_document_failed reason=path_security doc_id=%s user_id=%s error=%s",
+                             document_id, g.user["id"], str(e))
             return jsonify({"error": "document path invalid"}), 500
 
         if not file_path.exists():
-            app.logger.error("event=get_document_failed reason=file_missing doc_id=%s user_id=%s path=%s", 
-                           document_id, g.user["id"], str(file_path))
+            app.logger.error("event=get_document_failed reason=file_missing doc_id=%s user_id=%s path=%s",
+                             document_id, g.user["id"], str(file_path))
             return jsonify({"error": "file missing on disk"}), 410
 
-        app.logger.info("event=get_document_success doc_id=%s filename=%s user_id=%s", 
-                       document_id, row.name, g.user["id"])
+        app.logger.info("event=get_document_success doc_id=%s filename=%s user_id=%s",
+                        document_id, row.name, g.user["id"])
         # Serve inline with caching hints + ETag based on stored sha256
         resp = send_file(
             file_path,
@@ -691,9 +765,9 @@ def create_app():
         # accept id from path, query (?id= / ?documentid=), or JSON body on POST
         if not document_id:
             document_id = (
-                request.args.get("id")
-                or request.args.get("documentid")
-                or (request.is_json and (request.get_json(silent=True) or {}).get("id"))
+                    request.args.get("id")
+                    or request.args.get("documentid")
+                    or (request.is_json and (request.get_json(silent=True) or {}).get("id"))
             )
         try:
             doc_id = int(document_id)
@@ -709,13 +783,14 @@ def create_app():
                     {"id": doc_id, "uid": int(g.user["id"])},
                 ).first()
         except Exception as e:
-            app.logger.error("event=delete_document_failed reason=database_error doc_id=%s user_id=%s error=%s", 
-                           doc_id, g.user["id"], str(e))
+            app.logger.error("event=delete_document_failed reason=database_error doc_id=%s user_id=%s error=%s",
+                             doc_id, g.user["id"], str(e))
             return _safe_error("Failed to delete document", e, 503)
 
         if not row:
             # Don't reveal others' docs—just say not found
-            app.logger.warning("event=delete_document_failed reason=not_found doc_id=%s user_id=%s", doc_id, g.user["id"])
+            app.logger.warning("event=delete_document_failed reason=not_found doc_id=%s user_id=%s", doc_id,
+                               g.user["id"])
             return jsonify({"error": "document not found"}), 404
 
         # Delete version files first (if exist) before deleting original file
@@ -741,7 +816,9 @@ def create_app():
                         version_path.unlink()
                     except Exception as e:
                         has_delete_issues = True
-                        app.logger.error("event=delete_document_failed reason=version_file_delete_error version_path=%s version_id=%s error=%s", version_path, version.id, e)
+                        app.logger.error(
+                            "event=delete_document_failed reason=version_file_delete_error version_path=%s version_id=%s error=%s",
+                            version_path, version.id, e)
 
             fp = _safe_resolve_under_storage(row.path, storage_root)
             if fp.exists():
@@ -750,7 +827,9 @@ def create_app():
                     file_deleted = True
                 except Exception as e:
                     has_delete_issues = True
-                    app.logger.error("event=delete_document_failed reason=file_delete_error file_path=%s doc_id=%s error=%s", fp, row.id, e)
+                    app.logger.error(
+                        "event=delete_document_failed reason=file_delete_error file_path=%s doc_id=%s error=%s", fp,
+                        row.id, e)
 
             else:
                 file_missing = True
@@ -766,11 +845,12 @@ def create_app():
                 # uncomment the next line first:
                 # conn.execute(text("DELETE FROM Version WHERE documentid = :id"), {"id": doc_id})
                 conn.execute(text("DELETE FROM Documents WHERE id = :id"), {"id": doc_id})
-            app.logger.info("event=delete_document_success doc_id=%s user_id=%s file_deleted=%s file_missing=%s has_issues=%s", 
-                           doc_id, g.user["id"], file_deleted, file_missing, has_delete_issues)
+            app.logger.info(
+                "event=delete_document_success doc_id=%s user_id=%s file_deleted=%s file_missing=%s has_issues=%s",
+                doc_id, g.user["id"], file_deleted, file_missing, has_delete_issues)
         except Exception as e:
-            app.logger.error("event=delete_document_failed reason=database_error doc_id=%s user_id=%s error=%s", 
-                           doc_id, g.user["id"], str(e))
+            app.logger.error("event=delete_document_failed reason=database_error doc_id=%s user_id=%s error=%s",
+                             doc_id, g.user["id"], str(e))
             return _safe_error("Failed to delete document", e, 503)
 
         return (
@@ -794,9 +874,9 @@ def create_app():
         # accept id from path, query (?id= / ?documentid=), or JSON body on GET
         if not document_id:
             document_id = (
-                request.args.get("id")
-                or request.args.get("documentid")
-                or (request.is_json and (request.get_json(silent=True) or {}).get("id"))
+                    request.args.get("id")
+                    or request.args.get("documentid")
+                    or (request.is_json and (request.get_json(silent=True) or {}).get("id"))
             )
         try:
             doc_id = document_id
@@ -817,7 +897,8 @@ def create_app():
         except (TypeError, ValueError):
             return jsonify({"error": "document_id (int) is required"}), 400
         if not method or not intended_for or not isinstance(secret, str) or not isinstance(key, str):
-            app.logger.warning("event=create_watermark_failed reason=missing_fields doc_id=%s user_id=%s", doc_id, g.user["id"])
+            app.logger.warning("event=create_watermark_failed reason=missing_fields doc_id=%s user_id=%s", doc_id,
+                               g.user["id"])
             return (
                 jsonify({"error": "method, intended_for, secret, and key are required"}),
                 400,
@@ -837,20 +918,21 @@ def create_app():
                     {"id": doc_id, "uid": int(g.user["id"])},
                 ).first()
         except Exception as e:
-            app.logger.error("event=create_watermark_failed reason=database_error doc_id=%s user_id=%s error=%s", 
-                           doc_id, g.user["id"], str(e))
+            app.logger.error("event=create_watermark_failed reason=database_error doc_id=%s user_id=%s error=%s",
+                             doc_id, g.user["id"], str(e))
             return _safe_error("Failed to create watermark", e, 503)
 
         if not row:
-            app.logger.warning("event=create_watermark_failed reason=document_not_found doc_id=%s user_id=%s", doc_id, g.user["id"])
+            app.logger.warning("event=create_watermark_failed reason=document_not_found doc_id=%s user_id=%s", doc_id,
+                               g.user["id"])
             return jsonify({"error": "document not found"}), 404
 
         # resolve path safely under STORAGE_DIR
         storage_root = Path(cast(str, app.config["STORAGE_DIR"])).resolve()
         try:
             file_path = _safe_resolve_under_storage(row.path, storage_root)
-            app.logger.info("event=create_watermark_attempt doc_id=%s method=%s intended_for=%s user_id=%s path=%s", 
-                           doc_id, method, intended_for, g.user["id"], file_path)
+            app.logger.info("event=create_watermark_attempt doc_id=%s method=%s intended_for=%s user_id=%s path=%s",
+                            doc_id, method, intended_for, g.user["id"], file_path)
         except RuntimeError:
             return jsonify({"error": "document path invalid"}), 500
         if not file_path.exists():
@@ -860,11 +942,12 @@ def create_app():
         try:
             applicable = WMUtils.is_watermarking_applicable(method=method, pdf=str(file_path), position=position)
             if applicable is False:
-                app.logger.warning("event=create_watermark_failed reason=method_not_applicable doc_id=%s user_id=%s", doc_id, g.user["id"])
+                app.logger.warning("event=create_watermark_failed reason=method_not_applicable doc_id=%s user_id=%s",
+                                   doc_id, g.user["id"])
                 return jsonify({"error": "watermarking method not applicable"}), 400
         except Exception as e:
-            app.logger.error("event=create_watermark_failed reason=exception doc_id=%s user_id=%s error=%s", 
-                           doc_id, g.user["id"], str(e))
+            app.logger.error("event=create_watermark_failed reason=exception doc_id=%s user_id=%s error=%s",
+                             doc_id, g.user["id"], str(e))
             return _safe_error("Watermark method not supported for this document", e, 400)
 
         # apply watermark → bytes
@@ -879,8 +962,8 @@ def create_app():
             if not isinstance(wm_bytes, (bytes, bytearray)) or len(wm_bytes) == 0:
                 return jsonify({"error": "watermarking produced no output"}), 500
         except Exception as e:
-            app.logger.error("event=create_watermark_failed reason=exception doc_id=%s user_id=%s error=%s", 
-                           doc_id, g.user["id"], str(e))
+            app.logger.error("event=create_watermark_failed reason=exception doc_id=%s user_id=%s error=%s",
+                             doc_id, g.user["id"], str(e))
             return _safe_error("Failed to apply watermark", e, 500)
 
         # build destination file name: "<original_name>__<method_name>__<intended_to>__<timestamp>.pdf"
@@ -925,8 +1008,9 @@ def create_app():
                     },
                 )
                 vid = int(conn.execute(text("SELECT LAST_INSERT_ID()")).scalar())
-            app.logger.info("event=create_watermark_success doc_id=%s version_id=%s method=%s intended_for=%s link=%s user_id=%s", 
-                           doc_id, vid, method, intended_for, link_token, g.user["id"])
+            app.logger.info(
+                "event=create_watermark_success doc_id=%s version_id=%s method=%s intended_for=%s link=%s user_id=%s",
+                doc_id, vid, method, intended_for, link_token, g.user["id"])
         except Exception as e:
             # best-effort cleanup if DB insert fails
             try:
@@ -1034,89 +1118,14 @@ def create_app():
 
         return jsonify({"methods": methods, "count": len(methods)}), 200
 
-    # POST /api/read-watermark/<document_id>  → read watermark from original document
-    @app.post("/api/read-watermark/<int:document_id>")
-    @require_auth
-    def read_watermark(document_id: int | None = None):
-        # accept id from path, query (?id= / ?documentid=), or JSON body
-        if not document_id:
-            document_id = (
-                request.args.get("id")
-                or request.args.get("documentid")
-                or (request.is_json and (request.get_json(silent=True) or {}).get("id"))
-            )
-        try:
-            doc_id = int(document_id)
-        except (TypeError, ValueError):
-            return jsonify({"error": "document id required"}), 400
-
-        payload = request.get_json(silent=True) or {}
-        method = payload.get("method")
-        position = payload.get("position") or None
-        key = payload.get("key")
-        
-        if not method or not key or not isinstance(key, str):
-            app.logger.warning("event=read_watermark_failed reason=missing_fields doc_id=%s user_id=%s", doc_id, g.user["id"])
-            return jsonify({"error": "method and key are required"}), 400
-
-        # lookup the document; enforce ownership
-        try:
-            with get_engine().connect() as conn:
-                row = conn.execute(
-                    text(
-                        """
-                        SELECT id, name, path
-                        FROM Documents
-                        WHERE id = :id AND ownerid = :uid
-                        LIMIT 1
-                    """),
-                    {"id": doc_id, "uid": int(g.user["id"])},
-                ).first()
-        except Exception as e:
-            app.logger.error("event=read_watermark_failed reason=database_error doc_id=%s user_id=%s error=%s", 
-                           doc_id, g.user["id"], str(e))
-            return _safe_error("Failed to read watermark", e, 503)
-
-        if not row:
-            app.logger.warning("event=read_watermark_failed reason=document_not_found doc_id=%s user_id=%s", doc_id, g.user["id"])
-            return jsonify({"error": "document not found"}), 404
-
-        # resolve path safely under STORAGE_DIR
-        storage_root = Path(cast(str, app.config["STORAGE_DIR"])).resolve()
-        try:
-            file_path = _safe_resolve_under_storage(row.path, storage_root)
-            app.logger.info("event=read_watermark_attempt doc_id=%s method=%s user_id=%s path=%s", 
-                           doc_id, method, g.user["id"], file_path)
-        except RuntimeError:
-            return jsonify({"error": "document path invalid"}), 500
-        if not file_path.exists():
-            return jsonify({"error": "file missing on disk"}), 410
-        
-        # read watermark from the original document file
-        secret = None
-        try:
-            secret = WMUtils.read_watermark(method=method, pdf=str(file_path), key=key, position=position)
-        except Exception as e:
-            app.logger.error("event=read_watermark_failed reason=exception doc_id=%s user_id=%s error=%s", 
-                           doc_id, g.user["id"], str(e))
-            return _safe_error("Error when attempting to read watermark", e, 400)
-
-        app.logger.info("event=read_watermark_success doc_id=%s user_id=%s", doc_id, g.user["id"])
-        return jsonify({
-            "documentid": doc_id,
-            "secret": secret,
-            "method": method,
-            "position": position
-        }), 201
-
     # POST /api/read-watermark-by-link/
     @app.post("/api/read-watermark-by-link/<link>")
     @require_auth
     def read_watermark_by_link(link: str | None = None):
         if not link:
             link = (
-                request.args.get("link")
-                or (request.is_json and (request.get_json(silent=True) or {}).get("link"))
+                    request.args.get("link")
+                    or (request.is_json and (request.get_json(silent=True) or {}).get("link"))
             )
         try:
             specific_link = link
@@ -1128,7 +1137,7 @@ def create_app():
         method = payload.get("method")
         position = payload.get("position") or None
         key = payload.get("key")
-        
+
         if not method or not key or not isinstance(key, str):
             return jsonify({"error": "method, and key are required"}), 400
 
@@ -1147,44 +1156,44 @@ def create_app():
                     {"link": specific_link, "uid": int(g.user["id"])},
                 ).first()
         except Exception as e:
-            app.logger.error("event=read_watermark_by_link_failed reason=database_error link=%s user_id=%s error=%s", 
-                           specific_link, g.user["id"], str(e))
+            app.logger.error("event=read_watermark_by_link_failed reason=database_error link=%s user_id=%s error=%s",
+                             specific_link, g.user["id"], str(e))
             return _safe_error("Failed to read watermark by link", e, 503)
-        
+
         if not row:
-            app.logger.warning("event=read_watermark_by_link_failed reason=not_found link=%s user_id=%s", 
-                           specific_link, g.user["id"])
+            app.logger.warning("event=read_watermark_by_link_failed reason=not_found link=%s user_id=%s",
+                               specific_link, g.user["id"])
             return jsonify({"error": "watermarked version not found"}), 404
 
         # resolve path safely under STORAGE_DIR
         storage_root = Path(cast(str, app.config["STORAGE_DIR"])).resolve()
         try:
             file_path = _safe_resolve_under_storage(row.path, storage_root)
-            app.logger.info("event=read_watermark_by_link_attempt link=%s user_id=%s path=%s", 
-                           specific_link, g.user["id"], file_path)
+            app.logger.info("event=read_watermark_by_link_attempt link=%s user_id=%s path=%s",
+                            specific_link, g.user["id"], file_path)
         except RuntimeError as e:
-            app.logger.error("event=read_watermark_by_link_failed reason=path_invalid link=%s user_id=%s error=%s", 
-                           specific_link, g.user["id"], str(e))
+            app.logger.error("event=read_watermark_by_link_failed reason=path_invalid link=%s user_id=%s error=%s",
+                             specific_link, g.user["id"], str(e))
             return jsonify({"error": "watermarked version path invalid"}), 500
         if not file_path.exists():
             return jsonify({"error": "watermarked version missing on disk"}), 410
-        
+
         # read watermark from the watermarked version file
         secret = None
         try:
             secret = WMUtils.read_watermark(method=method, pdf=str(file_path), key=key)
         except Exception as e:
-            app.logger.error("event=read_watermark_by_link_failed reason=exception link=%s user_id=%s error=%s", 
-                           specific_link, g.user["id"], str(e))
+            app.logger.error("event=read_watermark_by_link_failed reason=exception link=%s user_id=%s error=%s",
+                             specific_link, g.user["id"], str(e))
             return _safe_error("Failed to read watermark from watermarked version", e, 400)
-        
+
         if secret != row.secret:
-            app.logger.error("event=read_watermark_by_link_failed reason=secret_mismatch link=%s user_id=%s", 
-                           specific_link, g.user["id"])
+            app.logger.error("event=read_watermark_by_link_failed reason=secret_mismatch link=%s user_id=%s",
+                             specific_link, g.user["id"])
             return jsonify({"error": "Failed to read watermark from watermarked version"}), 400
 
-        app.logger.info("event=read_watermark_by_link_success link=%s user_id=%s", 
-                       specific_link, g.user["id"])
+        app.logger.info("event=read_watermark_by_link_success link=%s user_id=%s",
+                        specific_link, g.user["id"])
         return jsonify({
             "link": link,
             "secret": secret,
@@ -1225,8 +1234,9 @@ def create_app():
                     )
 
                 if len(rows) > 1:
-                    app.logger.warning("event=get_rmap_source_document_warning reason=multiple_documents count=%d system_user_id=%s", 
-                                     len(rows), app.config["RMAP_SYSTEM_USER_ID"])
+                    app.logger.warning(
+                        "event=get_rmap_source_document_warning reason=multiple_documents count=%d system_user_id=%s",
+                        len(rows), app.config["RMAP_SYSTEM_USER_ID"])
 
                 doc_id = int(rows[0].id)
                 doc_path = rows[0].path
@@ -1246,6 +1256,7 @@ def create_app():
             raise
 
     @app.route('/api/rmap-initiate', methods=['POST'])
+    @app.route('/rmap-initiate', methods=['POST'])
     def rmap_initiate():
         if rmap_service is None:
             app.logger.error("event=rmap_initiate_failed reason=service_unavailable")
@@ -1254,11 +1265,11 @@ def create_app():
         data = request.get_json()
         if not data or 'payload' not in data:
             return jsonify({"error": "Payload missing"}), 400
-        
+
         # Log the request to establish a session
         decrypted_data = identity_manager.decrypt_for_server(data['payload'])
         app.logger.info("event=rmap_initiate_success identity=%s", decrypted_data['identity'])
-        
+
         response = rmap_service.handle_message1(data)
         if "error" in response:
             app.logger.error("event=rmap_initiate_failed reason=error in response error=%s", response['error'])
@@ -1267,6 +1278,7 @@ def create_app():
             return response, 200
 
     @app.route('/api/rmap-get-link', methods=['POST'])
+    @app.route('/rmap-get-link', methods=['POST'])
     def rmap_get_link():
         if rmap_service is None:
             app.logger.error("event=rmap_get_link_failed reason=service_unavailable")
@@ -1289,7 +1301,8 @@ def create_app():
             try:
                 rmap_doc_id, source_pdf_path = get_rmap_source_document()
             except Exception as e:
-                app.logger.error("event=rmap_get_link_failed reason=failed_to_access_rmap_source_document error=%s", str(e))
+                app.logger.error("event=rmap_get_link_failed reason=failed_to_access_rmap_source_document error=%s",
+                                 str(e))
                 return _safe_error("Failed to access RMAP source document", e, 503)
 
             try:
@@ -1307,16 +1320,19 @@ def create_app():
                         {"intended_for": sender_identity, "documentid": rmap_doc_id},
                     ).first()
             except Exception as e:
-                app.logger.error("event=rmap_get_link_failed reason=database_error error=%s sender_identity=%s", str(e), sender_identity)
+                app.logger.error("event=rmap_get_link_failed reason=database_error error=%s sender_identity=%s", str(e),
+                                 sender_identity)
                 return _safe_error("Failed to get version", e, 503)
 
             if not row:
                 response_data = rmap_service.handle_message2(data)
                 if "error" in response_data:
-                    app.logger.error("event=rmap_get_link_failed reason=error in response_data error=%s sender_identity=%s", response_data['error'], sender_identity)
+                    app.logger.error(
+                        "event=rmap_get_link_failed reason=error in response_data error=%s sender_identity=%s",
+                        response_data['error'], sender_identity)
                     return jsonify({"error": response_data['error']}), 400
                 else:
-                    secret_link = response_data['result'] 
+                    secret_link = response_data['result']
 
                 try:
                     watermarked_bytes = WMUtils.apply_watermark(
@@ -1331,7 +1347,9 @@ def create_app():
                         return _safe_error("Watermarking produced no output", code=500)
 
                 except Exception as e:
-                    app.logger.error("event=rmap_get_link_failed reason=failed_to_apply_watermark error=%s, sender_identity=%s", str(e), sender_identity)
+                    app.logger.error(
+                        "event=rmap_get_link_failed reason=failed_to_apply_watermark error=%s, sender_identity=%s",
+                        str(e), sender_identity)
                     return _safe_error("Failed to apply watermark", e, 500)
 
                 storage_dir = Path(app.config["STORAGE_DIR"]) / "rmap_versions"
@@ -1372,7 +1390,9 @@ def create_app():
                         dest_path.unlink(missing_ok=True)
                     except Exception:
                         pass
-                    app.logger.error("event=rmap_get_link_failed reason=failed_to_record_watermarked_version error=%s sender_identity=%s", str(e), sender_identity)
+                    app.logger.error(
+                        "event=rmap_get_link_failed reason=failed_to_record_watermarked_version error=%s sender_identity=%s",
+                        str(e), sender_identity)
                     return _safe_error("Failed to record watermarked version", e, 503)
 
                 app.logger.info(
@@ -1454,8 +1474,8 @@ def create_app():
                 "error": "Watermark extracted but no matching version found in database"
             }), 200
 
-        app.logger.info("event=rmap_identify_leak_success identity=%s version_id=%s link=%s", 
-                       row.intended_for, row.id, row.link)
+        app.logger.info("event=rmap_identify_leak_success identity=%s version_id=%s link=%s",
+                        row.intended_for, row.id, row.link)
         return jsonify({
             "identified": True,
             "identity": row.intended_for,

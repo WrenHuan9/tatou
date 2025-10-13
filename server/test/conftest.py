@@ -200,7 +200,7 @@ def auth_token(app) -> str:
 
     serializer = URLSafeTimedSerializer(
         app.config["SECRET_KEY"],
-        salt="tatou-auth"
+        salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
     )
     token = serializer.dumps({
         "uid": 1,

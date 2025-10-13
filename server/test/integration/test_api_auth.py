@@ -213,7 +213,7 @@ class TestAuthenticationFlow:
         import time
         
         # Create an expired token
-        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
+        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
         token_data = {"uid": 1, "login": "testuser", "email": "test@example.com"}
         
         # Create token that's already expired
@@ -233,7 +233,7 @@ class TestAuthenticationFlow:
         # Create a valid token
         serializer = URLSafeTimedSerializer(
             app.config["SECRET_KEY"],
-            salt="tatou-auth"
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
         )
         token_data = {"uid": 1, "login": "testuser", "email": "test@example.com"}
         valid_token = serializer.dumps(token_data)
@@ -332,3 +332,42 @@ class TestAuthenticationFlow:
         protected_data = protected_response.get_json()
         assert "documents" in protected_data
         assert protected_data["documents"] == []
+
+    def test_create_user_database_exception(self, client: FlaskClient, app: Flask):
+        """Test user creation with database exception."""
+        user_data = {
+            "email": "test@example.com",
+            "login": "testuser",
+            "password": "password123"
+        }
+
+        mock_conn = app.config['mock_db_conn']
+
+        # Mock database exception (not IntegrityError)
+        mock_conn.execute.side_effect = Exception("Database connection failed")
+
+        response = client.post("/api/create-user", json=user_data)
+
+        assert response.status_code == 503
+        data = response.get_json()
+        assert "error" in data
+        assert "Failed to create user" in data["error"]
+
+    def test_login_database_exception(self, client: FlaskClient, app: Flask):
+        """Test login with database exception."""
+        login_data = {
+            "email": "test@example.com",
+            "password": "password123"
+        }
+
+        mock_conn = app.config['mock_db_conn']
+
+        # Mock database exception
+        mock_conn.execute.side_effect = Exception("Database query failed")
+
+        response = client.post("/api/login", json=login_data)
+
+        assert response.status_code == 503
+        data = response.get_json()
+        assert "error" in data
+        assert "Login failed" in data["error"]

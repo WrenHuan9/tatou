@@ -31,7 +31,7 @@ class TestDocumentManagement:
         from itsdangerous import URLSafeTimedSerializer
         serializer = URLSafeTimedSerializer(
             app.config["SECRET_KEY"],
-            salt="tatou-auth"
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
         )
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
@@ -118,7 +118,7 @@ class TestDocumentManagement:
     def test_upload_document_no_file(self, client: FlaskClient, app: Flask):
         """Test document upload without file."""
         from itsdangerous import URLSafeTimedSerializer
-        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
+        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
         
@@ -135,7 +135,7 @@ class TestDocumentManagement:
     def test_upload_document_empty_filename(self, client: FlaskClient, app: Flask):
         """Test document upload with empty filename."""
         from itsdangerous import URLSafeTimedSerializer
-        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
+        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
         
@@ -165,7 +165,7 @@ class TestDocumentManagement:
         from itsdangerous import URLSafeTimedSerializer
         serializer = URLSafeTimedSerializer(
             app.config["SECRET_KEY"],
-            salt="tatou-auth"
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
         )
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
@@ -213,7 +213,7 @@ class TestDocumentManagement:
         from itsdangerous import URLSafeTimedSerializer
         serializer = URLSafeTimedSerializer(
             app.config["SECRET_KEY"],
-            salt="tatou-auth"
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
         )
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
@@ -236,7 +236,7 @@ class TestDocumentManagement:
         from itsdangerous import URLSafeTimedSerializer
         serializer = URLSafeTimedSerializer(
             app.config["SECRET_KEY"],
-            salt="tatou-auth"
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
         )
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
@@ -284,7 +284,7 @@ class TestDocumentManagement:
         from itsdangerous import URLSafeTimedSerializer
         serializer = URLSafeTimedSerializer(
             app.config["SECRET_KEY"],
-            salt="tatou-auth"
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
         )
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
@@ -307,7 +307,7 @@ class TestDocumentManagement:
         from itsdangerous import URLSafeTimedSerializer
         serializer = URLSafeTimedSerializer(
             app.config["SECRET_KEY"],
-            salt="tatou-auth"
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
         )
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
@@ -349,7 +349,7 @@ class TestDocumentManagement:
         from itsdangerous import URLSafeTimedSerializer
         serializer = URLSafeTimedSerializer(
             app.config["SECRET_KEY"],
-            salt="tatou-auth"
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
         )
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
@@ -430,7 +430,7 @@ class TestDocumentManagement:
         from itsdangerous import URLSafeTimedSerializer
         serializer = URLSafeTimedSerializer(
             app.config["SECRET_KEY"],
-            salt="tatou-auth"
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
         )
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
@@ -459,12 +459,72 @@ class TestDocumentManagement:
             assert result["deleted"] is True
             assert result["file_missing"] is True
 
+    def test_get_version_db_error_returns_503(self, client: FlaskClient, app: Flask):
+        """Cover lines 709-711: database error in get_version -> 503."""
+        mock_conn = app.config['mock_db_conn']
+        mock_conn.execute.side_effect = Exception("db failure")
+
+        response = client.get("/api/get-version/anylink")
+
+        assert response.status_code == 503
+        mock_conn.execute.side_effect = None
+
+    def test_get_version_invalid_path_returns_500(self, client: FlaskClient, app: Flask, simple_auth_headers: dict):
+        """Cover lines 720-722: path escapes STORAGE_DIR -> 500."""
+        mock_conn = app.config['mock_db_conn']
+
+        # Row with a suspicious path outside storage
+        row = MockRow(link="bad", path="../../etc/passwd", sha256_hex="deadbeef")
+        mock_result = MagicMock()
+        mock_result.first.return_value = row
+        mock_conn.execute.return_value = mock_result
+
+        response = client.get("/api/get-version/bad", headers=simple_auth_headers)
+        assert response.status_code == 500
+
+    def test_delete_document_db_error_returns_503(self, client: FlaskClient, app: Flask, simple_auth_headers: dict):
+        """Cover lines 785-788: DB error when fetching document -> 503."""
+        mock_conn = app.config['mock_db_conn']
+        mock_conn.execute.side_effect = Exception("db read error")
+
+        response = client.delete("/api/delete-document/1", headers=simple_auth_headers)
+        assert response.status_code == 503
+        mock_conn.execute.side_effect = None
+
+    def test_delete_document_path_security_violation_uses_relative_to_fallback(self, client: FlaskClient, app: Flask, simple_auth_headers: dict):
+        """Cover lines 754-757 by forcing fallback to relative_to and raising ValueError."""
+        mock_conn = app.config['mock_db_conn']
+
+        # Prepare a normal document row first
+        doc_row = MockRow(id=1, path=str(Path(app.config["STORAGE_DIR"]) / "files" / "user" / "doc.pdf"))
+        versions_result = MagicMock()
+        versions_result.fetchall.return_value = []
+        doc_result = MagicMock()
+        doc_result.first.return_value = doc_row
+        mock_conn.execute.side_effect = [doc_result, versions_result, MagicMock()]
+
+        # Force the helper to take the else branch by patching hasattr in module scope
+        import builtins
+        from server.src import server as server_module
+
+        real_hasattr = builtins.hasattr
+        def fake_hasattr(obj, name):
+            if name == "is_relative_to":
+                return False
+            return real_hasattr(obj, name)
+
+        with patch.object(server_module, 'hasattr', side_effect=fake_hasattr):
+            # Make the resolved path escape storage so relative_to raises ValueError
+            with patch('pathlib.Path.resolve', return_value=Path("/etc/passwd")):
+                response = client.delete("/api/delete-document/1", headers=simple_auth_headers)
+                assert response.status_code == 200
+
     def test_delete_document_file_missing(self, client: FlaskClient, app: Flask):
         """Test document deletion when file is already missing."""
         from itsdangerous import URLSafeTimedSerializer
         serializer = URLSafeTimedSerializer(
             app.config["SECRET_KEY"],
-            salt="tatou-auth"
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
         )
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
@@ -507,7 +567,7 @@ class TestDocumentManagement:
 
         serializer = URLSafeTimedSerializer(
             app.config["SECRET_KEY"],
-            salt="tatou-auth"
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
         )
         token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
         headers = {"Authorization": f"Bearer {token}"}
@@ -630,3 +690,259 @@ class TestDocumentManagement:
             assert delete_response.get_json()["deleted"] is True
 
             assert not uploaded_file_path.exists()
+
+    def test_upload_document_database_exception(self, client: FlaskClient, app: Flask):
+        """Test document upload with database exception (lines 421-424)."""
+        from itsdangerous import URLSafeTimedSerializer
+        import io
+
+        serializer = URLSafeTimedSerializer(
+            app.config["SECRET_KEY"],
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
+        )
+        token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Create test PDF data
+        pdf_data = b"%PDF-1.4\ntest content\n%%EOF"
+
+        # Ensure the storage directory structure exists
+        storage_dir = Path(app.config["STORAGE_DIR"])
+        user_dir = storage_dir / "files" / "testuser"
+        user_dir.mkdir(parents=True, exist_ok=True)
+
+        mock_conn = app.config['mock_db_conn']
+
+        # Mock database exception during document upload
+        mock_conn.execute.side_effect = Exception("Database connection failed")
+
+        # Test file upload
+        data = {
+            'file': (io.BytesIO(pdf_data), 'test.pdf', 'application/pdf'),
+            'name': 'Test Document'
+        }
+
+        response = client.post(
+            "/api/upload-document",
+            data=data,
+            headers=headers,
+            content_type='multipart/form-data'
+        )
+
+        # Verify response
+        assert response.status_code == 503
+        result = response.get_json()
+        assert "error" in result
+        assert "Failed to upload document" in result["error"]
+
+    def test_list_documents_database_exception(self, client: FlaskClient, app: Flask):
+        """Test document listing with database exception (lines 456-458)."""
+        from itsdangerous import URLSafeTimedSerializer
+
+        serializer = URLSafeTimedSerializer(
+            app.config["SECRET_KEY"],
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
+        )
+        token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
+        headers = {"Authorization": f"Bearer {token}"}
+
+        mock_conn = app.config['mock_db_conn']
+
+        # Mock database exception
+        mock_conn.execute.side_effect = Exception("Database query failed")
+
+        response = client.get("/api/list-documents", headers=headers)
+
+        assert response.status_code == 503
+        result = response.get_json()
+        assert "error" in result
+        assert "Failed to list documents" in result["error"]
+
+    def test_list_versions_invalid_document_id(self, client: FlaskClient, app: Flask):
+        """Test list versions with invalid document ID (lines 480-484)."""
+        from itsdangerous import URLSafeTimedSerializer
+
+        serializer = URLSafeTimedSerializer(
+            app.config["SECRET_KEY"],
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
+        )
+        token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Test with invalid document ID (non-numeric)
+        response = client.get("/api/list-versions?documentid=invalid_id", headers=headers)
+
+        assert response.status_code == 400
+        result = response.get_json()
+        assert "error" in result
+        assert "document id required" in result["error"]
+
+        # Test with missing document ID
+        response = client.get("/api/list-versions", headers=headers)
+
+        assert response.status_code == 400
+        result = response.get_json()
+        assert "error" in result
+        assert "document id required" in result["error"]
+
+    def test_list_versions_database_error(self, client: FlaskClient, app: Flask):
+        """Test list versions with database error (covers lines 500-501)."""
+        from itsdangerous import URLSafeTimedSerializer
+
+        serializer = URLSafeTimedSerializer(
+            app.config["SECRET_KEY"],
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
+        )
+        token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Mock database connection to raise exception
+        mock_conn = app.config['mock_db_conn']
+        mock_conn.execute.side_effect = Exception("Database connection failed")
+
+        response = client.get("/api/list-versions/1", headers=headers)
+
+        assert response.status_code == 503
+        result = response.get_json()
+        assert "error" in result
+        assert "Failed to list versions" in result["error"]
+
+    def test_list_all_versions_database_error(self, client: FlaskClient, app: Flask):
+        """Test list all versions with database error (covers lines 534-535)."""
+        from itsdangerous import URLSafeTimedSerializer
+
+        serializer = URLSafeTimedSerializer(
+            app.config["SECRET_KEY"],
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
+        )
+        token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Mock database connection to raise exception
+        mock_conn = app.config['mock_db_conn']
+        mock_conn.execute.side_effect = Exception("Database connection failed")
+
+        response = client.get("/api/list-all-versions", headers=headers)
+
+        assert response.status_code == 503
+        result = response.get_json()
+        assert "error" in result
+        assert "Failed to list all versions" in result["error"]
+
+    def test_get_document_invalid_id_parameter(self, client: FlaskClient, app: Flask):
+        """Test get document with invalid ID parameter (covers lines 556-560)."""
+        from itsdangerous import URLSafeTimedSerializer
+
+        serializer = URLSafeTimedSerializer(
+            app.config["SECRET_KEY"],
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
+        )
+        token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Test with non-numeric document ID
+        response = client.get("/api/get-document?id=invalid", headers=headers)
+        assert response.status_code == 400
+        result = response.get_json()
+        assert "error" in result
+        assert "document id required" in result["error"]
+
+        # Test with documentid parameter (non-numeric)
+        response = client.get("/api/get-document?documentid=abc", headers=headers)
+        assert response.status_code == 400
+        result = response.get_json()
+        assert "error" in result
+        assert "document id required" in result["error"]
+
+        # Test with None document ID
+        response = client.get("/api/get-document", headers=headers)
+        assert response.status_code == 400
+        result = response.get_json()
+        assert "error" in result
+        assert "document id required" in result["error"]
+
+    def test_get_document_database_error(self, client: FlaskClient, app: Flask):
+        """Test get document with database error (covers lines 575-578)."""
+        from itsdangerous import URLSafeTimedSerializer
+
+        serializer = URLSafeTimedSerializer(
+            app.config["SECRET_KEY"],
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
+        )
+        token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Mock database connection to raise exception
+        mock_conn = app.config['mock_db_conn']
+        mock_conn.execute.side_effect = Exception("Database query failed")
+
+        response = client.get("/api/get-document/1", headers=headers)
+
+        assert response.status_code == 503
+        result = response.get_json()
+        assert "error" in result
+        assert "Failed to get document" in result["error"]
+
+    def test_get_document_path_security_error(self, client: FlaskClient, app: Flask):
+        """Test get document with path security error (covers lines 589-593)."""
+        from itsdangerous import URLSafeTimedSerializer
+        from unittest.mock import patch
+        from pathlib import Path
+
+        serializer = URLSafeTimedSerializer(
+            app.config["SECRET_KEY"],
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
+        )
+        token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Mock database to return a document with suspicious path
+        mock_conn = app.config['mock_db_conn']
+        mock_row = MockRow(
+            id=1,
+            name="test.pdf",
+            path="../../../etc/passwd",  # Suspicious path
+            ownerid=1
+        )
+        mock_conn.execute.return_value.first.return_value = mock_row
+
+        # Mock Path.resolve() to raise exception when processing suspicious path
+        with patch('pathlib.Path.resolve', side_effect=Exception("Path traversal detected")):
+            response = client.get("/api/get-document/1", headers=headers)
+
+        assert response.status_code == 500
+        result = response.get_json()
+        assert "error" in result
+        assert "document path invalid" in result["error"]
+
+    def test_get_document_file_missing(self, client: FlaskClient, app: Flask):
+        """Test get document when file is missing on disk (covers lines 596-598)."""
+        from itsdangerous import URLSafeTimedSerializer
+        from unittest.mock import patch
+        from pathlib import Path
+
+        serializer = URLSafeTimedSerializer(
+            app.config["SECRET_KEY"],
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
+        )
+        token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Mock database to return a document
+        mock_conn = app.config['mock_db_conn']
+        mock_row = MockRow(
+            id=1,
+            name="missing.pdf",
+            path="files/testuser/missing.pdf",
+            ownerid=1
+        )
+        mock_conn.execute.return_value.first.return_value = mock_row
+
+        # Mock file path to not exist
+        with patch('pathlib.Path.exists', return_value=False):
+            response = client.get("/api/get-document/1", headers=headers)
+
+        assert response.status_code == 410
+        result = response.get_json()
+        assert "error" in result
+        assert "file missing on disk" in result["error"]
