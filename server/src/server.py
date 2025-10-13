@@ -18,7 +18,6 @@ from rmap.rmap import RMAP
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 from werkzeug.exceptions import NotFound, MethodNotAllowed, HTTPException
-from werkzeug.routing import BaseConverter
 
 try:
     import dill as _pickle  # allows loading classes not importable by module path
@@ -36,13 +35,6 @@ identity_manager = None
 
 def create_app():
     app = Flask(__name__)
-
-    # Regex route converter to constrain catch-all static file route
-    class RegexConverter(BaseConverter):
-        def __init__(self, map, *items):
-            super().__init__(map)
-            self.regex = items[0]
-    app.url_map.converters['re'] = RegexConverter
 
     # --- Config ---
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
@@ -295,36 +287,13 @@ def create_app():
 
     # --- Routes ---
 
-    # Serve static assets under a non-greedy prefix to avoid shadowing /api/* routes
-    @app.route("/static/<path:filename>")
+    @app.route("/<path:filename>")
     def static_files(filename):
         try:
             return app.send_static_file(filename)
         except NotFound:
             return jsonify({"error": "File not found"}), 404
 
-    # Also serve common static files at root (e.g., /style.css, /css/main.css),
-    # but only for known asset extensions and never for paths starting with api/
-    @app.route(
-        "/<re('^(?!api/).+\\.(?:css|js|html|png|jpg|jpeg|gif|svg|woff2?|ttf|eot)$'):filename>"
-    )
-    def static_files_root(filename):
-        try:
-            return app.send_static_file(filename)
-        except NotFound:
-            return jsonify({"error": "File not found"}), 404
-
-    # Fallback for any other root-level paths including nested directories.
-    # If it looks like an API path, force a 405 so tests expecting invalid method get the correct status.
-    @app.route("/<path:filename>")
-    def static_files_catchall(filename):
-        if filename.startswith('api/'):
-            # Let the framework surface a 405 for invalid methods on API endpoints
-            raise MethodNotAllowed()
-        try:
-            return app.send_static_file(filename)
-        except NotFound:
-            return jsonify({"error": "File not found"}), 404
 
     @app.route("/")
     def home():

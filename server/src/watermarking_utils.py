@@ -71,11 +71,7 @@ def get_method(method: str | WatermarkingMethod) -> WatermarkingMethod:
     ------
     KeyError
         If ``method`` is a string not present in :data:`METHODS`.
-    AttributeError
-        If ``method`` is None.
     """
-    if method is None:
-        raise AttributeError("'NoneType' object has no attribute 'name'")
     if isinstance(method, WatermarkingMethod):
         return method
     try:
@@ -171,17 +167,11 @@ def explore_pdf(pdf: PdfSource) -> Dict[str, Any]:
         doc = fitz.open(stream=data, filetype="pdf")
         # Pages as first-class nodes
         for page_index in range(doc.page_count):
-            try:
-                bbox = list(doc.load_page(page_index).bound())  # [x0,y0,x1,y1]
-            except Exception:
-                # If page.bound() fails, re-raise the exception
-                doc.close()
-                raise
             node = {
                 "id": f"page:{page_index:04d}",
                 "type": "Page",
                 "index": page_index,
-                "bbox": bbox,
+                "bbox": list(doc.load_page(page_index).bound()),  # [x0,y0,x1,y1]
             }
             root["children"].append(node)
 
@@ -192,12 +182,7 @@ def explore_pdf(pdf: PdfSource) -> Dict[str, Any]:
                 s = doc.xref_object(xref, compressed=False) or ""
             except Exception:
                 s = ""
-            if isinstance(s, str):
-                s_bytes = s.encode("latin-1", "replace")
-            elif isinstance(s, bytes):
-                s_bytes = s
-            else:
-                s_bytes = b""
+            s_bytes = s.encode("latin-1", "replace") if isinstance(s, str) else b""
             # Type detection
             m = _TYPE_RE.search(s_bytes)
             pdf_type = m.group(1).decode("ascii", "replace") if m else "Object"
@@ -214,39 +199,42 @@ def explore_pdf(pdf: PdfSource) -> Dict[str, Any]:
         return root
     except Exception:
         # Fallback: regex-based object scanning (no third-party deps)
-        children: List[Dict[str, Any]] = []
-        for m in _OBJ_RE.finditer(data):
-            obj_num = int(m.group(1))
-            gen_num = int(m.group(2))
-            start = m.end()
-            end_match = _ENDOBJ_RE.search(data, start)
-            end = end_match.start() if end_match else start
-            slice_bytes = data[start:end]
-            # Guess type
-            t = _TYPE_RE.search(slice_bytes)
-            pdf_type = t.group(1).decode("ascii", "replace") if t else "Object"
-            node = {
-                "id": f"obj:{obj_num:06d}:{gen_num:05d}",
-                "type": pdf_type,
-                "object": obj_num,
-                "generation": gen_num,
-                "content_sha1": _sha1(slice_bytes),
-            }
-            children.append(node)
+        pass
 
-        # Also derive simple page nodes by searching for '/Type /Page'
-        page_nodes = [c for c in children if c.get("type") == "Page"]
-        for i, c in enumerate(page_nodes):
-            # Provide deterministic page IDs independent from object numbers
-            c_page = {
-                "id": f"page:{i:04d}",
-                "type": "Page",
-                "xref_hint": c["id"],
-            }
-            children.insert(i, c_page)
+    # Regex fallback: enumerate uncompressed objects
+    children: List[Dict[str, Any]] = []
+    for m in _OBJ_RE.finditer(data):
+        obj_num = int(m.group(1))
+        gen_num = int(m.group(2))
+        start = m.end()
+        end_match = _ENDOBJ_RE.search(data, start)
+        end = end_match.start() if end_match else start
+        slice_bytes = data[start:end]
+        # Guess type
+        t = _TYPE_RE.search(slice_bytes)
+        pdf_type = t.group(1).decode("ascii", "replace") if t else "Object"
+        node = {
+            "id": f"obj:{obj_num:06d}:{gen_num:05d}",
+            "type": pdf_type,
+            "object": obj_num,
+            "generation": gen_num,
+            "content_sha1": _sha1(slice_bytes),
+        }
+        children.append(node)
 
-        root["children"] = children
-        return root
+    # Also derive simple page nodes by searching for '/Type /Page'
+    page_nodes = [c for c in children if c.get("type") == "Page"]
+    for i, c in enumerate(page_nodes):
+        # Provide deterministic page IDs independent from object numbers
+        c_page = {
+            "id": f"page:{i:04d}",
+            "type": "Page",
+            "xref_hint": c["id"],
+        }
+        children.insert(i, c_page)
+
+    root["children"] = children
+    return root
 
 
 __all__ = [
