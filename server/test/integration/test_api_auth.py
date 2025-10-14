@@ -9,13 +9,13 @@ import pytest
 from flask import Flask
 from flask.testing import FlaskClient
 from unittest.mock import patch, MagicMock
-
+from werkzeug.security import generate_password_hash
+from itsdangerous import URLSafeTimedSerializer
 
 @pytest.mark.integration
 class TestAuthenticationFlow:
     """Test the complete authentication flow."""
 
-    @pytest.mark.xfail
     def test_create_user_success(self, client: FlaskClient, app: Flask):
         """Test successful user creation."""
         user_data = {
@@ -29,8 +29,7 @@ class TestAuthenticationFlow:
         # Mock successful user creation
         mock_insert_result = MagicMock()
         mock_insert_result.lastrowid = 1
-        
-        # 模拟 SELECT 语句的返回值 (ResultProxy)
+
         mock_select_result = MagicMock()
         
         user_data_dict = {
@@ -39,15 +38,13 @@ class TestAuthenticationFlow:
             "login": "newuser"
         }
         mock_user_row = MagicMock(**user_data_dict)
-        mock_user_row._asdict.return_value = user_data_dict # 确保它可以被序列化
-        
-        # 关键修正：让 .one() 方法返回我们伪造的用户数据
+        mock_user_row._asdict.return_value = user_data_dict
+
         mock_select_result.one.return_value = mock_user_row
-        
-        # 3. 按顺序安排两次 execute 的返回值
+
         mock_conn.execute.side_effect = [
-            mock_insert_result,  # 响应第一次 execute (INSERT)
-            mock_select_result   # 响应第二次 execute (SELECT)
+            mock_insert_result,
+            mock_select_result
         ]
         
         response = client.post("/api/create-user", json=user_data)
@@ -76,65 +73,65 @@ class TestAuthenticationFlow:
             data = response.get_json()
             assert "error" in data
             assert "required" in data["error"].lower()
-    
-    @pytest.mark.xfail
-    def test_create_user_duplicate_email(self, client: FlaskClient):
+
+    def test_create_user_duplicate_email(self, client: FlaskClient, app: Flask):
         """Test user creation with duplicate email."""
         user_data = {
             "email": "duplicate@example.com",
             "login": "user1",
             "password": "password123"
         }
-        
-        with patch('sqlalchemy.create_engine') as mock_create_engine:
-            mock_conn = MagicMock()
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            mock_engine.begin.return_value.__enter__.return_value = mock_conn
-            
-            # Mock IntegrityError for duplicate email
-            from sqlalchemy.exc import IntegrityError
-            mock_conn.execute.side_effect = IntegrityError("", "", "")
-            
-            response = client.post("/api/create-user", json=user_data)
-            
-            assert response.status_code == 409
-            data = response.get_json()
-            assert "error" in data
-            assert "already exists" in data["error"]
-    
-    @pytest.mark.xfail
-    def test_login_success(self, client: FlaskClient):
+
+        mock_conn = app.config['mock_db_conn']
+
+        # Mock IntegrityError for duplicate email
+        from sqlalchemy.exc import IntegrityError
+        mock_conn.execute.side_effect = IntegrityError("", "", "")
+
+        response = client.post("/api/create-user", json=user_data)
+
+        mock_conn.execute.side_effect = None
+
+        assert response.status_code == 409
+        data = response.get_json()
+        assert "error" in data
+        assert "already exists" in data["error"].lower()
+
+    def test_login_success(self, client: FlaskClient, app: Flask):
         """Test successful login."""
         login_data = {
             "email": "test@example.com",
             "password": "testpassword123"
         }
-        
-        with patch('sqlalchemy.create_engine') as mock_create_engine:
-            mock_conn = MagicMock()
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            mock_engine.connect.return_value.__enter__.return_value = mock_conn
-            
-            # Mock successful login
-            from werkzeug.security import generate_password_hash
-            mock_row = MagicMock()
-            mock_row.id = 1
-            mock_row.email = "test@example.com"
-            mock_row.login = "testuser"
-            mock_row.hpassword = generate_password_hash("testpassword123")
-            mock_conn.execute.return_value.first.return_value = mock_row
-            
-            response = client.post("/api/login", json=login_data)
-            
-            assert response.status_code == 200
-            data = response.get_json()
-            assert "token" in data
-            assert data["token_type"] == "bearer"
-            assert "expires_in" in data
+
+        mock_conn = app.config['mock_db_conn']
+
+        from werkzeug.security import generate_password_hash
+        from collections import namedtuple
+
+        UserRow = namedtuple('UserRow', ['id', 'email', 'login', 'hpassword'])
+        mock_row = UserRow(
+            id=1,
+            email="test@example.com",
+            login="testuser",
+            hpassword=generate_password_hash("testpassword123")
+        )
+
+        mock_result = MagicMock()
+        mock_result.first.return_value = mock_row
+        mock_conn.execute.return_value = mock_result
+
+        response = client.post("/api/login", json=login_data)
+
+        mock_conn.execute.return_value = MagicMock()
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert "token" in data
+        assert data["token_type"] == "bearer"
+        assert "expires_in" in data
     
-    @pytest.mark.xfail
+
     def test_login_invalid_credentials(self, client: FlaskClient):
         """Test login with invalid credentials."""
         test_cases = [
@@ -230,80 +227,147 @@ class TestAuthenticationFlow:
         data = response.get_json()
         assert "error" in data
         assert "expired" in data["error"].lower()
-    
-    @pytest.mark.xfail
+
     def test_protected_endpoint_with_valid_token(self, client: FlaskClient, app: Flask):
         """Test accessing protected endpoint with valid token."""
-        from itsdangerous import URLSafeTimedSerializer
-        
         # Create a valid token
-        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
+        serializer = URLSafeTimedSerializer(
+            app.config["SECRET_KEY"],
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
+        )
         token_data = {"uid": 1, "login": "testuser", "email": "test@example.com"}
         valid_token = serializer.dumps(token_data)
-        
+
         headers = {"Authorization": f"Bearer {valid_token}"}
-        
-        with patch('sqlalchemy.create_engine') as mock_create_engine:
-            mock_conn = MagicMock()
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            mock_engine.connect.return_value.__enter__.return_value = mock_conn
-            
-            # Mock empty document list
-            mock_conn.execute.return_value.all.return_value = []
-            
-            response = client.get("/api/list-documents", headers=headers)
-            
-            # Should not get auth error (might get other errors, but not 401)
-            assert response.status_code != 401
-    
-    @pytest.mark.xfail
-    def test_complete_auth_flow(self, client: FlaskClient):
+
+        mock_conn = app.config['mock_db_conn']
+
+        mock_conn.execute.side_effect = None
+
+        mock_result = MagicMock()
+        mock_result.all.return_value = []
+        mock_conn.execute.return_value = mock_result
+
+        response = client.get("/api/list-documents", headers=headers)
+
+        assert response.status_code != 401
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert "documents" in data
+        assert data["documents"] == []
+
+    def test_complete_auth_flow(self, client: FlaskClient, app: Flask):
         """Test complete authentication flow from user creation to accessing protected endpoint."""
         user_data = {
             "email": "flowtest@example.com",
             "login": "flowtest",
             "password": "flowpassword123"
         }
-        
-        with patch('sqlalchemy.create_engine') as mock_create_engine:
-            mock_conn = MagicMock()
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            
-            # Step 1: Create user
-            mock_engine.begin.return_value.__enter__.return_value = mock_conn
-            mock_result = MagicMock()
-            mock_result.lastrowid = 1
-            mock_conn.execute.side_effect = [
-                mock_result,  # INSERT result
-                MagicMock(id=1, email="flowtest@example.com", login="flowtest")  # SELECT result
-            ]
-            
-            create_response = client.post("/api/create-user", json=user_data)
-            assert create_response.status_code == 201
-            
-            # Step 2: Login
-            mock_engine.connect.return_value.__enter__.return_value = mock_conn
-            from werkzeug.security import generate_password_hash
-            mock_row = MagicMock()
-            mock_row.id = 1
-            mock_row.email = "flowtest@example.com"
-            mock_row.login = "flowtest"
-            mock_row.hpassword = generate_password_hash("flowpassword123")
-            mock_conn.execute.return_value.first.return_value = mock_row
-            
-            login_response = client.post("/api/login", json={
-                "email": user_data["email"],
-                "password": user_data["password"]
-            })
-            assert login_response.status_code == 200
-            
-            token = login_response.get_json()["token"]
-            
-            # Step 3: Access protected endpoint
-            headers = {"Authorization": f"Bearer {token}"}
-            mock_conn.execute.return_value.all.return_value = []
-            
-            protected_response = client.get("/api/list-documents", headers=headers)
-            assert protected_response.status_code == 200
+
+        mock_conn = app.config['mock_db_conn']
+
+        # Step 1: Create user
+
+        mock_insert_result = MagicMock()
+        mock_insert_result.lastrowid = 1
+
+        mock_select_result = MagicMock()
+        mock_user_row = MagicMock()
+        mock_user_row.id = 1
+        mock_user_row.email = "flowtest@example.com"
+        mock_user_row.login = "flowtest"
+        mock_select_result.one.return_value = mock_user_row
+
+        mock_conn.execute.side_effect = [
+            mock_insert_result,  # INSERT INTO Users
+            mock_select_result  # SELECT from Users (with .one())
+        ]
+
+        create_response = client.post("/api/create-user", json=user_data)
+        assert create_response.status_code == 201, f"Expected 201, got {create_response.status_code}"
+
+        response_data = create_response.get_json()
+        assert response_data["id"] == 1
+        assert response_data["email"] == "flowtest@example.com"
+        assert response_data["login"] == "flowtest"
+
+        # Step 2: Login
+
+        mock_conn.execute.side_effect = None
+
+        mock_login_result = MagicMock()
+        mock_login_row = MagicMock()
+        mock_login_row.id = 1
+        mock_login_row.email = "flowtest@example.com"
+        mock_login_row.login = "flowtest"
+        mock_login_row.hpassword = generate_password_hash("flowpassword123")
+        mock_login_result.first.return_value = mock_login_row
+
+        mock_conn.execute.return_value = mock_login_result
+
+        login_response = client.post("/api/login", json={
+            "email": user_data["email"],
+            "password": user_data["password"]
+        })
+        assert login_response.status_code == 200, f"Expected 200, got {login_response.status_code}, response: {login_response.get_json()}"
+
+        login_data = login_response.get_json()
+        assert "token" in login_data
+        assert "token_type" in login_data
+        assert login_data["token_type"] == "bearer"
+        token = login_data["token"]
+
+        # Step 3: Access protected endpoint
+        mock_conn.execute.side_effect = None
+
+        mock_docs_result = MagicMock()
+        mock_docs_result.all.return_value = []
+        mock_conn.execute.return_value = mock_docs_result
+
+        headers = {"Authorization": f"Bearer {token}"}
+        protected_response = client.get("/api/list-documents", headers=headers)
+
+        assert protected_response.status_code == 200, f"Expected 200, got {protected_response.status_code}"
+        protected_data = protected_response.get_json()
+        assert "documents" in protected_data
+        assert protected_data["documents"] == []
+
+    def test_create_user_database_exception(self, client: FlaskClient, app: Flask):
+        """Test user creation with database exception."""
+        user_data = {
+            "email": "test@example.com",
+            "login": "testuser",
+            "password": "password123"
+        }
+
+        mock_conn = app.config['mock_db_conn']
+
+        # Mock database exception (not IntegrityError)
+        mock_conn.execute.side_effect = Exception("Database connection failed")
+
+        response = client.post("/api/create-user", json=user_data)
+
+        assert response.status_code == 503
+        data = response.get_json()
+        assert "error" in data
+        assert "Failed to create user" in data["error"]
+
+    def test_login_database_exception(self, client: FlaskClient, app: Flask):
+        """Test login with database exception."""
+        login_data = {
+            "email": "test@example.com",
+            "password": "password123"
+        }
+
+        mock_conn = app.config['mock_db_conn']
+
+        # Mock database exception
+        mock_conn.execute.side_effect = Exception("Database query failed")
+
+        response = client.post("/api/login", json=login_data)
+
+        assert response.status_code == 503
+        data = response.get_json()
+        assert "error" in data
+        assert "Login failed" in data["error"]
