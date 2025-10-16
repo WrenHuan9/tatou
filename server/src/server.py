@@ -81,12 +81,28 @@ def create_app():
         stream_handler.setFormatter(formatter)
         app.logger.addHandler(stream_handler)
     app.logger.setLevel(getattr(logging, app.config["LOG_LEVEL"], logging.INFO))
+    
+    from security_monitor import SecurityMonitor
+    global security_monitor
+    security_monitor = SecurityMonitor(app.logger)
 
     @app.before_request
     def _log_request():
         # Store request info in g for later use
         g.request_start_time = dt.datetime.utcnow()
         g.client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.environ.get('REMOTE_ADDR', 'unknown'))
+
+        if security_monitor.check_rate_limiting(g.client_ip):
+            app.logger.error(f"SECURITY_BLOCK: Rate limit exceeded for IP {g.client_ip}")
+            return jsonify({"error": "Rate limit exceeded"}), 429
+
+        if security_monitor.is_suspicious_ip(g.client_ip):
+            app.logger.error(f"SECURITY_BLOCK: Suspicious IP {g.client_ip}")
+            return jsonify({"error": "Access denied"}), 403
+
+        if security_monitor.check_path_traversal(g.client_ip, request.path):
+            app.logger.error(f"SECURITY_BLOCK: Path traversal attempt from IP {g.client_ip}")
+            return jsonify({"error": "Invalid path"}), 400
 
         # Only log requests for API endpoints, skip static files
         if request.path.startswith('/api/'):
@@ -368,8 +384,11 @@ def create_app():
             return _safe_error("Login failed", e, 503)
 
         if not row or not check_password_hash(row.hpassword, password):
+            security_monitor.check_login_brute_force(g.client_ip, False)
             return jsonify({"error": "invalid credentials"}), 401
 
+        security_monitor.check_login_brute_force(g.client_ip, True)
+        
         token = _serializer().dumps({"uid": int(row.id), "login": row.login, "email": row.email})
         app.logger.info("event=login_success user_id=%s email=%s login=%s", row.id, email, row.login)
         return (
@@ -406,6 +425,10 @@ def create_app():
         # Read file content to validate it's actually a PDF
         file_content = file.read()
         file.seek(0)  # Reset file pointer for later save
+
+        if security_monitor.check_file_upload_attack(g.client_ip, len(file_content), fname):
+            app.logger.error(f"SECURITY_BLOCK: File upload attack from IP {g.client_ip}")
+            return jsonify({"error": "File upload blocked"}), 400
 
         # Validate PDF content
         if not is_pdf_bytes(file_content):
@@ -680,6 +703,7 @@ def create_app():
             return _safe_error("Failed to get version", e, 503)
 
         if not row:
+            security_monitor.check_watermark_link_brute_force(g.client_ip, 404)
             return jsonify({"error": "document not found"}), 404
 
         # Basic safety: ensure path is inside STORAGE_DIR and exists
@@ -1241,9 +1265,11 @@ def create_app():
 
         response = rmap_service.handle_message1(data)
         if "error" in response:
+            security_monitor.check_rmap_attack(g.client_ip, False, response['error'])
             app.logger.error("event=rmap_initiate_failed reason=error in response error=%s", response['error'])
             return jsonify({"error": response['error']}), 400
         else:
+            security_monitor.check_rmap_attack(g.client_ip, True)
             return response, 200
 
     @app.route('/api/rmap-get-link', methods=['POST'])
@@ -1389,8 +1415,11 @@ def create_app():
     def rmap_identify_leak():
         admin_key = request.headers.get('X-Admin-Key') or request.form.get('admin_key')
         if not admin_key or admin_key != app.config["RMAP_ADMIN_KEY"]:
+            security_monitor.check_admin_access_attack(g.client_ip, False)
             app.logger.warning("event=rmap_identify_leak_failed reason=unauthorized")
             return jsonify({"error": "Unauthorized: Invalid or missing admin key"}), 401
+        else:
+            security_monitor.check_admin_access_attack(g.client_ip, True)
 
         if 'file' not in request.files:
             return jsonify({"error": "file is required (multipart/form-data)"}), 400
@@ -1457,6 +1486,83 @@ def create_app():
                 "path": row.path
             }
         }), 200
+
+    # GET /api/security-status 
+    @app.get("/api/security-status")
+    def security_status():
+        admin_key = request.headers.get('X-Admin-Key')
+        if not admin_key or admin_key != app.config["RMAP_ADMIN_KEY"]:
+            security_monitor.check_admin_access_attack(g.client_ip, False)
+            return jsonify({"error": "Unauthorized: Invalid or missing admin key"}), 401
+        
+        security_monitor.check_admin_access_attack(g.client_ip, True)
+        summary = security_monitor.get_security_summary()
+        return jsonify({
+            "security_summary": summary,
+            "timestamp": dt.datetime.utcnow().isoformat()
+        }), 200
+    
+    @app.route('/api/security-recover', methods=['POST'])
+    def security_recover():
+        """Recover from attacks - clear suspicious IPs and reset counters"""
+        admin_key = request.headers.get('X-Admin-Key')
+        if not admin_key or admin_key != app.config["RMAP_ADMIN_KEY"]:
+            security_monitor.check_admin_access_attack(g.client_ip, False)
+            return jsonify({"error": "Unauthorized: Invalid or missing admin key"}), 401
+        
+        security_monitor.check_admin_access_attack(g.client_ip, True)
+        
+        data = request.get_json() or {}
+        ip = data.get('ip')
+        attack_type = data.get('attack_type')
+        
+        recovery_result = security_monitor.recover_from_attack(ip, attack_type)
+        
+        app.logger.info(
+            "event=security_recovery_request ip=%s attack_type=%s actions=%s",
+            g.client_ip, attack_type, "; ".join(recovery_result['recovery_actions'])
+        )
+        
+        return jsonify({
+            "recovery_result": recovery_result,
+            "timestamp": dt.datetime.utcnow().isoformat()
+        })
+    
+    @app.route('/api/security-incidents', methods=['GET'])
+    def security_incidents():
+        """Get attack incidents for analysis"""
+        admin_key = request.headers.get('X-Admin-Key')
+        if not admin_key or admin_key != app.config["RMAP_ADMIN_KEY"]:
+            security_monitor.check_admin_access_attack(g.client_ip, False)
+            return jsonify({"error": "Unauthorized: Invalid or missing admin key"}), 401
+        
+        security_monitor.check_admin_access_attack(g.client_ip, True)
+        
+        limit = request.args.get('limit', 50, type=int)
+        incidents = security_monitor.get_attack_incidents(limit)
+        
+        return jsonify({
+            "incidents": incidents,
+            "total_count": len(incidents),
+            "timestamp": dt.datetime.utcnow().isoformat()
+        })
+    
+    @app.route('/api/security-analysis', methods=['GET'])
+    def security_analysis():
+        """Analyze attack patterns for recovery planning"""
+        admin_key = request.headers.get('X-Admin-Key')
+        if not admin_key or admin_key != app.config["RMAP_ADMIN_KEY"]:
+            security_monitor.check_admin_access_attack(g.client_ip, False)
+            return jsonify({"error": "Unauthorized: Invalid or missing admin key"}), 401
+        
+        security_monitor.check_admin_access_attack(g.client_ip, True)
+        
+        analysis = security_monitor.analyze_attack_patterns()
+        
+        return jsonify({
+            "analysis": analysis,
+            "timestamp": dt.datetime.utcnow().isoformat()
+        })
 
     return app
 

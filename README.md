@@ -38,7 +38,7 @@ From the root of the directory:
 
 ```bash
 # Create a file to set environement variables like passwords.
-cp sample.env .env
+cp .env .env
 
 # Edit .env and pick the passwords you want
 
