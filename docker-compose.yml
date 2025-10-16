@@ -10,7 +10,7 @@ services:
     volumes:
       - user-files:/app/storage
       - ./keys:/app/keys:ro
-      - ./logs:/app/logs
+      - logs-data:/app/logs
     environment:
       - PYTHONUNBUFFERED=1
       # DB connection details for future use by the API
@@ -23,6 +23,9 @@ services:
       - PRIVATE_KEY_PASSPHRASE=${PRIVATE_KEY_PASSPHRASE}
       - WATERMARK_KEY=${WATERMARK_KEY}
       - RMAP_ADMIN_KEY=${RMAP_ADMIN_KEY}
+      # Logging configuration
+      - LOG_DIR=/app/logs
+      - LOG_LEVEL=INFO
     depends_on:
       db:
         condition: service_healthy
@@ -65,3 +68,4 @@ services:
 volumes:
   db-data:
   user-files:
+  logs-data:

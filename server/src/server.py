@@ -61,25 +61,58 @@ def create_app():
     app.config["LOG_DIR"] = Path(os.environ.get("LOG_DIR", "./logs")).resolve()
     app.config["LOG_LEVEL"] = os.environ.get("LOG_LEVEL", "INFO").upper()
 
+    # Ensure log directory exists and is writable
+    log_dir = app.config["LOG_DIR"]
     try:
-        app.config["LOG_DIR"].mkdir(parents=True, exist_ok=True)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        # Test if we can write to the directory
+        test_file = log_dir / ".test_write"
+        test_file.touch()
+        test_file.unlink()
+        app.logger.info(f"Log directory {log_dir} is writable")
+    except Exception as e:
+        app.logger.warning(f"Cannot write to log directory {log_dir}: {e}")
+        # Fallback to /tmp if log directory is not writable
+        log_dir = Path("/tmp/logs")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        app.config["LOG_DIR"] = log_dir
+        app.logger.info(f"Using fallback log directory: {log_dir}")
+
+    try:
         app.config["STORAGE_DIR"].mkdir(parents=True, exist_ok=True)
     except Exception:
         pass
 
-    # Avoid adding duplicate handlers if create_app is called multiple times
-    if not app.logger.handlers:
-        log_file = app.config["LOG_DIR"] / "app.log"
-        file_handler = RotatingFileHandler(str(log_file), maxBytes=5 * 1024 * 1024, backupCount=20)
+    # Configure logging handlers
+    log_file = app.config["LOG_DIR"] / "app.log"
+    
+    # Check if file handler already exists
+    has_file_handler = any(isinstance(h, RotatingFileHandler) for h in app.logger.handlers)
+    has_stream_handler = any(isinstance(h, logging.StreamHandler) and not isinstance(h, RotatingFileHandler) for h in app.logger.handlers)
+    
+    # Add file handler if not present
+    if not has_file_handler:
+        try:
+            file_handler = RotatingFileHandler(str(log_file), maxBytes=5 * 1024 * 1024, backupCount=20)
+            formatter = logging.Formatter(
+                fmt="%(asctime)s %(levelname)s %(name)s %(message)s",
+            )
+            file_handler.setFormatter(formatter)
+            app.logger.addHandler(file_handler)
+            app.logger.info(f"File logging enabled: {log_file}")
+        except Exception as e:
+            app.logger.warning(f"Failed to create file handler: {e}")
+    
+    # Add stream handler if not present
+    if not has_stream_handler:
+        stream_handler = logging.StreamHandler()
         formatter = logging.Formatter(
             fmt="%(asctime)s %(levelname)s %(name)s %(message)s",
         )
-        file_handler.setFormatter(formatter)
-        app.logger.addHandler(file_handler)
-        # Also log to stdout (useful in containers)
-        stream_handler = logging.StreamHandler()
         stream_handler.setFormatter(formatter)
         app.logger.addHandler(stream_handler)
+        app.logger.info("Console logging enabled")
+    
     app.logger.setLevel(getattr(logging, app.config["LOG_LEVEL"], logging.INFO))
     
     from security_monitor import SecurityMonitor
