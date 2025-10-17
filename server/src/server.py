@@ -1132,8 +1132,7 @@ def create_app():
                 pass
             return _safe_error("Failed to create watermark", e, 503)
 
-        return (
-            jsonify(
+        return jsonify(
                 {
                     "id": vid,
                     "documentid": doc_id,
@@ -1144,10 +1143,9 @@ def create_app():
                     "filename": candidate,
                     "size": len(wm_bytes),
                 }
-            ),
-            201,
-        )
-
+            ), 201
+        except (ValueError, TypeError, KeyError) as e:
+            return jsonify({"error": "document_id (int) is required"}), 400
     # @app.post("/api/load-plugin")
     # @require_auth
     # def load_plugin():
