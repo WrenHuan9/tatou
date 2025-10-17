@@ -1,0 +1,230 @@
+# Fuzzing Configuration for Tatou API
+# This configuration file defines the fuzzing parameters and test strategies
+
+# Base configuration
+base_url: "http://localhost:5001"
+openapi_spec: "./openapi.yaml"
+
+# Test execution settings
+workers: 4
+max_response_time: 30
+max_requests_per_test: 100
+max_failures: 50
+
+# Authentication settings
+auth:
+  bearer_token: "test_token_12345"  # This will be replaced with actual token during runtime
+  admin_key: "admin_secret_key_12345"  # This will be replaced with actual admin key during runtime
+
+# Test strategies
+strategies:
+  - "positive"  # Test with valid data
+  - "negative"  # Test with invalid data
+  - "edge_cases"  # Test boundary conditions
+  - "malformed"  # Test with malformed requests
+
+# Specific endpoint configurations
+endpoints:
+  # Health check - no auth required
+  "/healthz":
+    enabled: true
+    auth_required: false
+    test_cases: 50
+    
+  # User management endpoints
+  "/api/create-user":
+    enabled: true
+    auth_required: false
+    test_cases: 100
+    fuzz_fields:
+      - "login"
+      - "password" 
+      - "email"
+      
+  "/api/login":
+    enabled: true
+    auth_required: false
+    test_cases: 100
+    fuzz_fields:
+      - "email"
+      - "password"
+      
+  # Document management endpoints
+  "/api/upload-document":
+    enabled: true
+    auth_required: true
+    test_cases: 50
+    fuzz_fields:
+      - "name"
+      - "file"  # Will test with various file types and sizes
+      
+  "/api/list-documents":
+    enabled: true
+    auth_required: true
+    test_cases: 30
+    
+  "/api/get-document":
+    enabled: true
+    auth_required: true
+    test_cases: 50
+    fuzz_params:
+      - "id"
+      
+  "/api/get-document/{document_id}":
+    enabled: true
+    auth_required: true
+    test_cases: 50
+    fuzz_path_params:
+      - "document_id"
+      
+  # Version management endpoints
+  "/api/list-versions":
+    enabled: true
+    auth_required: true
+    test_cases: 50
+    fuzz_params:
+      - "documentid"
+      
+  "/api/list-versions/{document_id}":
+    enabled: true
+    auth_required: true
+    test_cases: 50
+    fuzz_path_params:
+      - "document_id"
+      
+  "/api/list-all-versions":
+    enabled: true
+    auth_required: true
+    test_cases: 30
+    
+  "/api/get-version/{link}":
+    enabled: true
+    auth_required: true
+    test_cases: 50
+    fuzz_path_params:
+      - "link"
+      
+  # Watermarking endpoints
+  "/api/get-watermarking-methods":
+    enabled: true
+    auth_required: true
+    test_cases: 20
+    
+  "/api/read-watermark-by-link/{link}":
+    enabled: true
+    auth_required: true
+    test_cases: 50
+    fuzz_path_params:
+      - "link"
+    fuzz_fields:
+      - "method"
+      - "position"
+      - "key"
+      
+  "/api/create-watermark":
+    enabled: true
+    auth_required: true
+    test_cases: 50
+    fuzz_fields:
+      - "method"
+      - "position"
+      - "key"
+      - "secret"
+      - "intended_for"
+      - "id"
+      
+  "/api/create-watermark/{document_id}":
+    enabled: true
+    auth_required: true
+    test_cases: 50
+    fuzz_path_params:
+      - "document_id"
+    fuzz_fields:
+      - "method"
+      - "position"
+      - "key"
+      - "secret"
+      - "intended_for"
+      
+  # Document deletion endpoints
+  "/api/delete-document":
+    enabled: true
+    auth_required: true
+    test_cases: 30
+    fuzz_fields:
+      - "document_id"
+      
+  "/api/delete-document/{document_id}":
+    enabled: true
+    auth_required: true
+    test_cases: 30
+    fuzz_path_params:
+      - "document_id"
+      
+  # RMAP endpoints
+  "/api/rmap-initiate":
+    enabled: true
+    auth_required: false
+    test_cases: 30
+    fuzz_fields:
+      - "payload"
+      
+  "/api/rmap-get-link":
+    enabled: true
+    auth_required: false
+    test_cases: 30
+    fuzz_fields:
+      - "payload"
+      
+  "/api/rmap-identify-leak":
+    enabled: true
+    auth_required: true
+    admin_required: true
+    test_cases: 20
+    fuzz_fields:
+      - "file"
+      - "admin_key"
+
+# Fuzzing data generators
+fuzz_data:
+  strings:
+    - "normal_string"
+    - "very_long_string_repeated_many_times"
+    - ""
+    - "null"
+    - "undefined"
+    - "true"
+    - "false"
+    - "0"
+    - "1"
+    - "special_chars_!@#$%^&*()"
+    - "unicode_测试_中文"
+    - "sql_injection'; DROP TABLE users; --"
+    - "xss_<script>alert('xss')</script>"
+    - "path_traversal_../../../etc/passwd"
+    
+  integers:
+    - 0
+    - 1
+    - -1
+    - 2147483647  # Max int32
+    - -2147483648  # Min int32
+    - 9223372036854775807  # Max int64
+    - -9223372036854775808  # Min int64
+    
+  emails:
+    - "test@example.com"
+    - "invalid_email"
+    - "test@"
+    - "@example.com"
+    - "test@example"
+    - "very_long_email_repeated_many_times@example.com"
+    
+  file_types:
+    - "application/pdf"
+    - "text/plain"
+    - "image/jpeg"
+    - "application/zip"
+    - "application/x-executable"
+    - "text/html"
+    - "application/json"

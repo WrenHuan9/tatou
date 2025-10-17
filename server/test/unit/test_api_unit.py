@@ -708,8 +708,14 @@ class TestWatermarkManagement:
         token_data = {"uid": 1, "login": "testuser", "email": "test@example.com"}
         return serializer.dumps(token_data)
 
-    def test_get_watermarking_methods(self, client: FlaskClient):
+    def test_get_watermarking_methods(self, client: FlaskClient, app: Flask):
         """Test getting available watermarking methods."""
+        # Create a valid token for authentication
+        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
+        token_data = {"uid": 1, "login": "testuser", "email": "test@example.com"}
+        valid_token = serializer.dumps(token_data)
+        headers = {"Authorization": f"Bearer {valid_token}"}
+
         with patch('watermarking_utils.METHODS', {"test-method": MagicMock()}), \
              patch('watermarking_utils.get_method') as mock_get_method:
 
@@ -717,7 +723,7 @@ class TestWatermarkManagement:
             mock_method.get_usage.return_value = "Test method description"
             mock_get_method.return_value = mock_method
 
-            response = client.get("/api/get-watermarking-methods")
+            response = client.get("/api/get-watermarking-methods", headers=headers)
 
             assert response.status_code == 200
             data = response.get_json()
@@ -1026,6 +1032,95 @@ class TestRMAPFunctionality:
             data = response.get_json()
             assert "error" in data
             assert "Payload missing" in data["error"]
+
+    def test_rmap_initiate_empty_payload(self, client: FlaskClient):
+        """Test RMAP initiate with empty payload string."""
+        with patch('server.src.server.rmap_service', MagicMock()):
+            response = client.post("/api/rmap-initiate", json={"payload": ""})
+
+            assert response.status_code == 400
+            data = response.get_json()
+            assert "error" in data
+            assert "non-empty string" in data["error"]
+
+    def test_rmap_initiate_invalid_payload_type(self, client: FlaskClient):
+        """Test RMAP initiate with invalid payload type."""
+        with patch('server.src.server.rmap_service', MagicMock()):
+            # Test with non-string payload
+            response = client.post("/api/rmap-initiate", json={"payload": 123})
+
+            assert response.status_code == 400
+            data = response.get_json()
+            assert "error" in data
+            assert "non-empty string" in data["error"]
+
+    def test_rmap_initiate_payload_validation_exceptions(self, client: FlaskClient):
+        """Test RMAP initiate with payload validation exceptions."""
+        mock_rmap_service = MagicMock()
+        mock_identity_manager = MagicMock()
+        
+        # Test with ValueError exception
+        mock_identity_manager.decrypt_for_server.side_effect = ValueError("Invalid payload format")
+        
+        with patch('server.src.server.rmap_service', mock_rmap_service), \
+                patch('server.src.server.identity_manager', mock_identity_manager):
+            response = client.post("/api/rmap-initiate", json={"payload": "invalid_payload"})
+
+            assert response.status_code == 400
+            data = response.get_json()
+            assert "error" in data
+            assert "Invalid or malformed RMAP payload" in data["error"]
+
+    def test_rmap_initiate_payload_type_error(self, client: FlaskClient):
+        """Test RMAP initiate with TypeError exception."""
+        mock_rmap_service = MagicMock()
+        mock_identity_manager = MagicMock()
+        
+        # Test with TypeError exception
+        mock_identity_manager.decrypt_for_server.side_effect = TypeError("Type error")
+        
+        with patch('server.src.server.rmap_service', mock_rmap_service), \
+                patch('server.src.server.identity_manager', mock_identity_manager):
+            response = client.post("/api/rmap-initiate", json={"payload": "test"})
+
+            assert response.status_code == 400
+            data = response.get_json()
+            assert "error" in data
+            assert "Invalid or malformed RMAP payload" in data["error"]
+
+    def test_rmap_initiate_payload_key_error(self, client: FlaskClient):
+        """Test RMAP initiate with KeyError exception."""
+        mock_rmap_service = MagicMock()
+        mock_identity_manager = MagicMock()
+        
+        # Test with KeyError exception
+        mock_identity_manager.decrypt_for_server.side_effect = KeyError("Missing key")
+        
+        with patch('server.src.server.rmap_service', mock_rmap_service), \
+                patch('server.src.server.identity_manager', mock_identity_manager):
+            response = client.post("/api/rmap-initiate", json={"payload": "test"})
+
+            assert response.status_code == 400
+            data = response.get_json()
+            assert "error" in data
+            assert "Invalid or malformed RMAP payload" in data["error"]
+
+    def test_rmap_initiate_payload_attribute_error(self, client: FlaskClient):
+        """Test RMAP initiate with AttributeError exception."""
+        mock_rmap_service = MagicMock()
+        mock_identity_manager = MagicMock()
+        
+        # Test with AttributeError exception
+        mock_identity_manager.decrypt_for_server.side_effect = AttributeError("Missing attribute")
+        
+        with patch('server.src.server.rmap_service', mock_rmap_service), \
+                patch('server.src.server.identity_manager', mock_identity_manager):
+            response = client.post("/api/rmap-initiate", json={"payload": "test"})
+
+            assert response.status_code == 400
+            data = response.get_json()
+            assert "error" in data
+            assert "Invalid or malformed RMAP payload" in data["error"]
 
     def test_rmap_initiate_success(self, client: FlaskClient):
         """Test successful RMAP initiate."""
@@ -1610,15 +1705,21 @@ class TestCompleteWorkflows:
 class TestErrorHandlingAndEdgeCases:
     """Test error handling and edge cases."""
 
-    def test_database_connection_errors(self, client: FlaskClient):
+    def test_database_connection_errors(self, client: FlaskClient, app: Flask):
         """Test handling of database connection errors."""
+        # Create a valid token for authentication
+        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
+        token_data = {"uid": 1, "login": "testuser", "email": "test@example.com"}
+        valid_token = serializer.dumps(token_data)
+        headers = {"Authorization": f"Bearer {valid_token}"}
+
         with patch('sqlalchemy.create_engine') as mock_create_engine:
             mock_engine = MagicMock()
             mock_create_engine.return_value = mock_engine
             mock_engine.connect.side_effect = Exception("Database connection failed")
 
             # This should still work for endpoints that don't require DB
-            response = client.get("/api/get-watermarking-methods")
+            response = client.get("/api/get-watermarking-methods", headers=headers)
             # The response depends on whether watermarking utils are mocked
             assert response.status_code in [200, 500]
 
