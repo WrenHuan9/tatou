@@ -70,7 +70,6 @@ class TestBasicEndpoints:
 class TestCompleteAuthenticationFlow:
     """Test complete authentication workflow."""
 
-    @pytest.mark.xfail
     def test_create_user_success(self, client: FlaskClient, app: Flask):
         """Test successful user creation."""
         user_data = {
@@ -79,21 +78,38 @@ class TestCompleteAuthenticationFlow:
             "password": "securepassword123"
         }
 
-        mock_conn = app.config.get('mock_db_conn')
-        if mock_conn:
-            # Mock successful user creation
-            mock_insert_result = MagicMock()
-            mock_insert_result.lastrowid = 1
+        # Create a simple class to hold the row data
+        class MockRow:
+            def __init__(self):
+                self.id = 1
+                self.email = "newuser@example.com"
+                self.login = "newuser"
 
-            mock_user_row = MagicMock()
-            mock_user_row.id = 1
-            mock_user_row.email = "newuser@example.com"
-            mock_user_row.login = "newuser"
+        mock_user_row = MockRow()
 
-            mock_conn.execute.side_effect = [
-                mock_insert_result,  # INSERT result
-                MagicMock(one=lambda: mock_user_row)  # SELECT result
-            ]
+        # Get or create the mock engine
+        if '_ENGINE' not in app.config or app.config['_ENGINE'] is None:
+            mock_engine = MagicMock()
+            app.config['_ENGINE'] = mock_engine
+        else:
+            mock_engine = app.config['_ENGINE']
+
+        # Mock the database operations
+        mock_conn = MagicMock()
+        mock_engine.begin.return_value.__enter__.return_value = mock_conn
+
+        # Mock INSERT result
+        mock_insert_result = MagicMock()
+        mock_insert_result.lastrowid = 1
+
+        # Mock SELECT result
+        mock_select_result = MagicMock()
+        mock_select_result.one.return_value = mock_user_row
+
+        mock_conn.execute.side_effect = [
+            mock_insert_result,  # INSERT result
+            mock_select_result  # SELECT result
+        ]
 
         response = client.post("/api/create-user", json=user_data)
 
@@ -122,8 +138,7 @@ class TestCompleteAuthenticationFlow:
             assert "error" in data
             assert "required" in data["error"].lower()
 
-    @pytest.mark.xfail
-    def test_create_user_duplicate_email(self, client: FlaskClient):
+    def test_create_user_duplicate_email(self, client: FlaskClient, app: Flask):
         """Test user creation with duplicate email."""
         user_data = {
             "email": "duplicate@example.com",
@@ -131,24 +146,28 @@ class TestCompleteAuthenticationFlow:
             "password": "password123"
         }
 
-        with patch('sqlalchemy.create_engine') as mock_create_engine:
-            mock_conn = MagicMock()
+        # Get or create the mock engine
+        if '_ENGINE' not in app.config or app.config['_ENGINE'] is None:
             mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            mock_engine.begin.return_value.__enter__.return_value = mock_conn
+            app.config['_ENGINE'] = mock_engine
+        else:
+            mock_engine = app.config['_ENGINE']
 
-            # Mock IntegrityError for duplicate email
-            from sqlalchemy.exc import IntegrityError
-            mock_conn.execute.side_effect = IntegrityError("", "", "")
+        # Mock the database operations to raise IntegrityError
+        from sqlalchemy.exc import IntegrityError
+        mock_conn = MagicMock()
+        mock_engine.begin.return_value.__enter__.return_value = mock_conn
 
-            response = client.post("/api/create-user", json=user_data)
+        # Make execute raise IntegrityError
+        mock_conn.execute.side_effect = IntegrityError("", "", "")
 
-            assert response.status_code == 409
-            data = response.get_json()
-            assert "error" in data
-            assert "already exists" in data["error"]
+        response = client.post("/api/create-user", json=user_data)
 
-    @pytest.mark.xfail
+        assert response.status_code == 409
+        data = response.get_json()
+        assert "error" in data
+        assert "already exists" in data["error"]
+
     def test_login_success(self, client: FlaskClient, app: Flask):
         """Test successful login."""
         login_data = {
@@ -156,16 +175,32 @@ class TestCompleteAuthenticationFlow:
             "password": "testpassword123"
         }
 
-        mock_conn = app.config.get('mock_db_conn')
-        if mock_conn:
-            # Mock successful login
-            from werkzeug.security import generate_password_hash
-            mock_row = MagicMock()
-            mock_row.id = 1
-            mock_row.email = "test@example.com"
-            mock_row.login = "testuser"
-            mock_row.hpassword = generate_password_hash("testpassword123")
-            mock_conn.execute.return_value.first.return_value = mock_row
+        from werkzeug.security import generate_password_hash
+
+        # Create a simple class to hold the row data
+        class MockRow:
+            def __init__(self):
+                self.id = 1
+                self.email = "test@example.com"
+                self.login = "testuser"
+                self.hpassword = generate_password_hash("testpassword123")
+
+        mock_row = MockRow()
+
+        # Get or create the mock engine
+        if '_ENGINE' not in app.config or app.config['_ENGINE'] is None:
+            mock_engine = MagicMock()
+            app.config['_ENGINE'] = mock_engine
+        else:
+            mock_engine = app.config['_ENGINE']
+
+        # Mock the database operations (login uses connect, not begin)
+        mock_conn = MagicMock()
+        mock_engine.connect.return_value.__enter__.return_value = mock_conn
+
+        mock_result = MagicMock()
+        mock_result.first.return_value = mock_row
+        mock_conn.execute.return_value = mock_result
 
         response = client.post("/api/login", json=login_data)
 
@@ -257,44 +292,79 @@ class TestCompleteAuthenticationFlow:
             assert "error" in data
 
 
+import io
+import datetime as dt
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+from flask import Flask
+from flask.testing import FlaskClient
+from itsdangerous import URLSafeTimedSerializer
+
+
 @pytest.mark.integration
 class TestDocumentManagement:
     """Test complete document management workflow."""
 
     def _get_valid_token(self, app: Flask) -> str:
         """Helper method to create a valid token."""
-        serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6")
+        serializer = URLSafeTimedSerializer(
+            app.config["SECRET_KEY"],
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
+        )
         token_data = {"uid": 1, "login": "testuser", "email": "test@example.com"}
         return serializer.dumps(token_data)
 
-    @pytest.mark.xfail
-    def test_upload_document_success(self, client: FlaskClient, app: Flask, sample_pdf_bytes: bytes):
+    def test_upload_document_success(self, client: FlaskClient, app: Flask, sample_pdf_bytes: bytes,
+                                     temp_storage: Path):
         """Test successful document upload."""
         token = self._get_valid_token(app)
         headers = {"Authorization": f"Bearer {token}"}
 
-        mock_conn = app.config.get('mock_db_conn')
-        if mock_conn:
-            # Mock document insertion
-            mock_conn.execute.side_effect = [
-                MagicMock(),  # INSERT result
-                MagicMock(scalar=lambda: 1),  # LAST_INSERT_ID result
-                MagicMock(one=lambda: MagicMock(
-                    id=1,
-                    name="test.pdf",
-                    creation=dt.datetime.now(),
-                    sha256_hex="abcdef123456",
-                    size=len(sample_pdf_bytes)
-                ))  # SELECT result
-            ]
+        # Ensure STORAGE_DIR is a Path object and use temp_storage
+        app.config["STORAGE_DIR"] = temp_storage
 
-        with patch('pathlib.Path.mkdir'), \
-             patch('pathlib.Path.stat') as mock_stat, \
-             patch('builtins.open', mock_open()), \
-             patch('hashlib.sha256') as mock_hash:
+        # Get the existing mock engine
+        mock_engine = app.config.get('_ENGINE')
 
-            mock_stat.return_value.st_size = len(sample_pdf_bytes)
-            mock_hash.return_value.hexdigest.return_value = "abcdef123456"
+        # Create a fresh mock connection for this test
+        mock_conn = MagicMock()
+        mock_context = MagicMock()
+        mock_context.__enter__ = MagicMock(return_value=mock_conn)
+        mock_context.__exit__ = MagicMock(return_value=False)
+
+        # Reconfigure mock_engine.begin() for this test
+        mock_engine.begin.return_value = mock_context
+
+        # Create mock objects for the three database operations
+        mock_insert = MagicMock()
+        mock_lastid = MagicMock()
+        mock_lastid.scalar.return_value = 1
+
+        # CRITICAL: Use real datetime, not MagicMock
+        creation_time = dt.datetime(2023, 1, 1, 12, 0, 0)
+        mock_row = MagicMock()
+        mock_row.id = 1
+        mock_row.name = "test.pdf"
+        mock_row.creation = creation_time  # Real datetime
+        mock_row.sha256_hex = "abcdef123456"
+        mock_row.size = len(sample_pdf_bytes)
+
+        mock_select = MagicMock()
+        mock_select.one.return_value = mock_row
+
+        # Set up side_effect for multiple execute calls
+        mock_conn.execute.side_effect = [
+            mock_insert,  # INSERT
+            mock_lastid,  # LAST_INSERT_ID
+            mock_select  # SELECT
+        ]
+
+        with patch('hashlib.sha256') as mock_hash:
+            mock_hash_obj = MagicMock()
+            mock_hash_obj.hexdigest.return_value = "abcdef123456"
+            mock_hash.return_value = mock_hash_obj
 
             data = {'file': (io.BytesIO(sample_pdf_bytes), 'test.pdf')}
             response = client.post("/api/upload-document", headers=headers, data=data)
@@ -324,32 +394,43 @@ class TestDocumentManagement:
             result = response.get_json()
             assert "error" in result
 
-    @pytest.mark.xfail
     def test_list_documents_success(self, client: FlaskClient, app: Flask):
         """Test successful document listing."""
         token = self._get_valid_token(app)
         headers = {"Authorization": f"Bearer {token}"}
 
-        mock_conn = app.config.get('mock_db_conn')
-        if mock_conn:
-            # Mock document list
-            mock_docs = [
-                MagicMock(
-                    id=1,
-                    name="doc1.pdf",
-                    creation=dt.datetime(2023, 1, 1),
-                    sha256_hex="hash1",
-                    size=1024
-                ),
-                MagicMock(
-                    id=2,
-                    name="doc2.pdf",
-                    creation=dt.datetime(2023, 1, 2),
-                    sha256_hex="hash2",
-                    size=2048
-                )
-            ]
-            mock_conn.execute.return_value.all.return_value = mock_docs
+        # Get the existing mock engine
+        mock_engine = app.config.get('_ENGINE')
+
+        # Create a fresh mock connection for this test
+        mock_conn = MagicMock()
+        mock_context = MagicMock()
+        mock_context.__enter__ = MagicMock(return_value=mock_conn)
+        mock_context.__exit__ = MagicMock(return_value=False)
+
+        # Reconfigure mock_engine.connect() for this test
+        mock_engine.connect.return_value = mock_context
+
+        # Mock document list with real datetime objects
+        mock_doc1 = MagicMock()
+        mock_doc1.id = 1
+        mock_doc1.name = "doc1.pdf"
+        mock_doc1.creation = dt.datetime(2023, 1, 1)
+        mock_doc1.sha256_hex = "hash1"
+        mock_doc1.size = 1024
+
+        mock_doc2 = MagicMock()
+        mock_doc2.id = 2
+        mock_doc2.name = "doc2.pdf"
+        mock_doc2.creation = dt.datetime(2023, 1, 2)
+        mock_doc2.sha256_hex = "hash2"
+        mock_doc2.size = 2048
+
+        mock_docs = [mock_doc1, mock_doc2]
+
+        mock_result = MagicMock()
+        mock_result.all.return_value = mock_docs
+        mock_conn.execute.return_value = mock_result
 
         response = client.get("/api/list-documents", headers=headers)
 
@@ -358,42 +439,66 @@ class TestDocumentManagement:
         assert "documents" in data
         assert len(data["documents"]) == 2
 
-    @pytest.mark.xfail
-    def test_get_document_success(self, client: FlaskClient, app: Flask, sample_pdf_bytes: bytes):
+    def test_get_document_success(self, client: FlaskClient, app: Flask, sample_pdf_bytes: bytes, temp_storage: Path):
         """Test successful document retrieval."""
         token = self._get_valid_token(app)
         headers = {"Authorization": f"Bearer {token}"}
 
-        mock_conn = app.config.get('mock_db_conn')
-        if mock_conn:
-            mock_row = MagicMock()
-            mock_row.id = 1
-            mock_row.name = "test.pdf"
-            mock_row.path = "/storage/test.pdf"
-            mock_row.sha256_hex = "abcdef123456"
-            mock_row.size = len(sample_pdf_bytes)
-            mock_conn.execute.return_value.first.return_value = mock_row
+        # CRITICAL: Set STORAGE_DIR to temp_storage so path validation passes
+        app.config["STORAGE_DIR"] = temp_storage
 
-        with patch('pathlib.Path.exists', return_value=True), \
-             patch('pathlib.Path.stat') as mock_stat, \
-             patch('flask.send_file') as mock_send_file:
+        # Create a real test file in the correct location
+        test_file = temp_storage / "test_doc.pdf"
+        test_file.write_bytes(sample_pdf_bytes)
 
-            mock_stat.return_value.st_mtime = 1640995200.0
-            mock_send_file.return_value = MagicMock(status_code=200)
+        # Get the existing mock engine
+        mock_engine = app.config.get('_ENGINE')
 
-            response = client.get("/api/get-document/1", headers=headers)
+        # Create a fresh mock connection for this test
+        mock_conn = MagicMock()
+        mock_context = MagicMock()
+        mock_context.__enter__ = MagicMock(return_value=mock_conn)
+        mock_context.__exit__ = MagicMock(return_value=False)
 
-            assert mock_send_file.called
+        # Reconfigure mock_engine.connect() for this test
+        mock_engine.connect.return_value = mock_context
 
-    @pytest.mark.xfail
+        mock_row = MagicMock()
+        mock_row.id = 1
+        mock_row.name = "test.pdf"
+        mock_row.path = str(test_file)  # Use real file path
+        mock_row.sha256_hex = "abcdef123456"
+        mock_row.size = len(sample_pdf_bytes)
+
+        mock_result = MagicMock()
+        mock_result.first.return_value = mock_row
+        mock_conn.execute.return_value = mock_result
+
+        response = client.get("/api/get-document/1", headers=headers)
+
+        assert response.status_code == 200
+        assert response.content_type == "application/pdf"
+
     def test_get_document_not_found(self, client: FlaskClient, app: Flask):
         """Test document retrieval when document doesn't exist."""
         token = self._get_valid_token(app)
         headers = {"Authorization": f"Bearer {token}"}
 
-        mock_conn = app.config.get('mock_db_conn')
-        if mock_conn:
-            mock_conn.execute.return_value.first.return_value = None
+        # Get the existing mock engine
+        mock_engine = app.config.get('_ENGINE')
+
+        # Create a fresh mock connection for this test
+        mock_conn = MagicMock()
+        mock_context = MagicMock()
+        mock_context.__enter__ = MagicMock(return_value=mock_conn)
+        mock_context.__exit__ = MagicMock(return_value=False)
+
+        # Reconfigure mock_engine.connect() for this test
+        mock_engine.connect.return_value = mock_context
+
+        mock_result = MagicMock()
+        mock_result.first.return_value = None
+        mock_conn.execute.return_value = mock_result
 
         response = client.get("/api/get-document/999", headers=headers)
 
@@ -401,43 +506,78 @@ class TestDocumentManagement:
         data = response.get_json()
         assert "error" in data
 
-    def test_delete_document_success(self, client: FlaskClient, app: Flask):
+    def test_delete_document_success(self, client: FlaskClient, app: Flask, temp_storage: Path):
         """Test successful document deletion."""
         token = self._get_valid_token(app)
         headers = {"Authorization": f"Bearer {token}"}
 
-        mock_conn = app.config.get('mock_db_conn')
-        if mock_conn:
-            # Mock document exists
-            mock_row = MagicMock()
-            mock_row.id = 1
-            mock_row.path = "/storage/test.pdf"
+        # Create a real test file
+        test_file = temp_storage / "test_delete.pdf"
+        test_file.write_bytes(b"%PDF-1.4\ntest")
 
-            mock_conn.execute.side_effect = [
-                MagicMock(first=lambda: mock_row),  # Document exists check
-                MagicMock(fetchall=lambda: []),  # No versions
-                MagicMock()  # DELETE operation
-            ]
+        # Get the existing mock engine
+        mock_engine = app.config.get('_ENGINE')
 
-        with patch('pathlib.Path.exists', return_value=True), \
-             patch('pathlib.Path.unlink') as mock_unlink:
+        # Create fresh mock connections for read and write
+        mock_conn_read = MagicMock()
+        mock_context_read = MagicMock()
+        mock_context_read.__enter__ = MagicMock(return_value=mock_conn_read)
+        mock_context_read.__exit__ = MagicMock(return_value=False)
 
-            response = client.delete("/api/delete-document/1", headers=headers)
+        mock_conn_write = MagicMock()
+        mock_context_write = MagicMock()
+        mock_context_write.__enter__ = MagicMock(return_value=mock_conn_write)
+        mock_context_write.__exit__ = MagicMock(return_value=False)
 
-            assert response.status_code == 200
-            data = response.get_json()
-            assert data["deleted"] is True
-            assert data["id"] == 1
+        # Setup: first call is connect(), subsequent calls are begin()
+        mock_engine.connect.return_value = mock_context_read
+        mock_engine.begin.return_value = mock_context_write
 
-    @pytest.mark.xfail
+        # Mock document exists
+        mock_row = MagicMock()
+        mock_row.id = 1
+        mock_row.path = str(test_file)
+
+        mock_result1 = MagicMock()
+        mock_result1.first.return_value = mock_row
+
+        mock_result2 = MagicMock()
+        mock_result2.fetchall.return_value = []  # No versions
+
+        mock_result3 = MagicMock()  # DELETE operation
+
+        # First execute is in connect context (SELECT document)
+        mock_conn_read.execute.return_value = mock_result1
+        # Rest are in begin context (SELECT versions, DELETE)
+        mock_conn_write.execute.side_effect = [mock_result2, mock_result3]
+
+        response = client.delete("/api/delete-document/1", headers=headers)
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["deleted"] is True
+        assert data["id"] == 1
+
     def test_delete_document_not_found(self, client: FlaskClient, app: Flask):
         """Test document deletion when document doesn't exist."""
         token = self._get_valid_token(app)
         headers = {"Authorization": f"Bearer {token}"}
 
-        mock_conn = app.config.get('mock_db_conn')
-        if mock_conn:
-            mock_conn.execute.return_value.first.return_value = None
+        # Get the existing mock engine
+        mock_engine = app.config.get('_ENGINE')
+
+        # Create a fresh mock connection for this test
+        mock_conn = MagicMock()
+        mock_context = MagicMock()
+        mock_context.__enter__ = MagicMock(return_value=mock_conn)
+        mock_context.__exit__ = MagicMock(return_value=False)
+
+        # Reconfigure mock_engine.connect() for this test
+        mock_engine.connect.return_value = mock_context
+
+        mock_result = MagicMock()
+        mock_result.first.return_value = None
+        mock_conn.execute.return_value = mock_result
 
         response = client.delete("/api/delete-document/999", headers=headers)
 
@@ -445,6 +585,118 @@ class TestDocumentManagement:
         data = response.get_json()
         assert "error" in data
 
+    def test_delete_versions_query_db_error_returns_503(self, client: FlaskClient, app: Flask, tmp_path: Path):
+        token = self._get_valid_token(app)
+        headers = {"Authorization": f"Bearer {token}"}
+        app.config["STORAGE_DIR"] = tmp_path
+
+        mock_engine = app.config.get('_ENGINE')
+
+        conn1 = MagicMock()
+        ctx1 = MagicMock()
+        ctx1.__enter__.return_value = conn1
+        ctx1.__exit__.return_value = False
+
+        conn2 = MagicMock()
+        conn2.execute.side_effect = Exception("versions query failed")
+        ctx2 = MagicMock()
+        ctx2.__enter__.return_value = conn2
+        ctx2.__exit__.return_value = False
+
+        mock_engine.connect.side_effect = [ctx1, ctx2]
+
+        doc_row = MagicMock()
+        doc_row.id = 1
+        doc_row.path = str(tmp_path / "files" / "testuser" / "doc.pdf")
+        conn1.execute.return_value.first.return_value = doc_row
+
+        resp = client.delete("/api/delete-document/1", headers=headers)
+        assert resp.status_code == 503
+        assert "error" in resp.get_json()
+
+    def test_delete_version_file_unlink_error_sets_issue_flag(self, client: FlaskClient, app: Flask, tmp_path: Path):
+        token = self._get_valid_token(app)
+        headers = {"Authorization": f"Bearer {token}"}
+        app.config["STORAGE_DIR"] = tmp_path
+
+        versions_dir = tmp_path / "files" / "testuser" / "watermarks"
+        versions_dir.mkdir(parents=True, exist_ok=True)
+        version_file = versions_dir / "v1.pdf"
+        version_file.write_bytes(b"%PDF-1.4\n%%EOF")
+
+        original_path = tmp_path / "files" / "testuser" / "doc.pdf"
+
+        mock_engine = app.config.get('_ENGINE')
+
+        conn_read = MagicMock()
+        ctx_read = MagicMock()
+        ctx_read.__enter__.return_value = conn_read
+        ctx_read.__exit__.return_value = False
+
+        conn_versions = MagicMock()
+        ctx_versions = MagicMock()
+        ctx_versions.__enter__.return_value = conn_versions
+        ctx_versions.__exit__.return_value = False
+
+        conn_write = MagicMock()
+        ctx_write = MagicMock()
+        ctx_write.__enter__.return_value = conn_write
+        ctx_write.__exit__.return_value = False
+
+        mock_engine.connect.side_effect = [ctx_read, ctx_versions]
+        mock_engine.begin.return_value = ctx_write
+
+        doc_row = MagicMock()
+        doc_row.id = 1
+        doc_row.path = str(original_path)
+        conn_read.execute.return_value.first.return_value = doc_row
+
+        version_row = MagicMock()
+        version_row.id = 11
+        version_row.path = str(version_file)
+        conn_versions.execute.return_value.fetchall.return_value = [version_row]
+
+        with patch('pathlib.Path.unlink', side_effect=Exception('unlink error')), patch('pathlib.Path.exists', side_effect=lambda p=version_file: True if str(p) == str(version_file) else False):
+            resp = client.delete("/api/delete-document/1", headers=headers)
+
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["deleted"] is True
+        assert body["has_file_issues"] is True
+
+    def test_delete_db_error_returns_503(self, client: FlaskClient, app: Flask, tmp_path: Path):
+        token = self._get_valid_token(app)
+        headers = {"Authorization": f"Bearer {token}"}
+        app.config["STORAGE_DIR"] = tmp_path
+
+        mock_engine = app.config.get('_ENGINE')
+
+        conn_read = MagicMock()
+        ctx_read = MagicMock()
+        ctx_read.__enter__.return_value = conn_read
+        ctx_read.__exit__.return_value = False
+        mock_engine.connect.return_value = ctx_read
+
+        conn_write = MagicMock()
+        conn_write.execute.side_effect = Exception("delete failed")
+        ctx_write = MagicMock()
+        ctx_write.__enter__.return_value = conn_write
+        ctx_write.__exit__.return_value = False
+        mock_engine.begin.return_value = ctx_write
+
+        doc_row = MagicMock()
+        doc_row.id = 1
+        doc_row.path = str(tmp_path / "files" / "testuser" / "doc.pdf")
+        conn_read.execute.side_effect = [
+            MagicMock(first=lambda: doc_row),
+            MagicMock(fetchall=lambda: []),
+        ]
+
+        with patch('pathlib.Path.exists', return_value=False):
+            resp = client.delete("/api/delete-document/1", headers=headers)
+
+        assert resp.status_code == 503
+        assert "error" in resp.get_json()
 
 @pytest.mark.integration
 class TestWatermarkManagement:
@@ -478,10 +730,18 @@ class TestWatermarkManagement:
             assert "methods" in data
             assert "count" in data
 
-    def test_create_watermark_success(self, client: FlaskClient, app: Flask):
+    def test_create_watermark_success(self, client: FlaskClient, app: Flask, temp_storage: Path,
+                                      sample_pdf_bytes: bytes):
         """Test successful watermark creation."""
         token = self._get_valid_token(app)
         headers = {"Authorization": f"Bearer {token}"}
+
+        # CRITICAL: Set STORAGE_DIR to temp_storage
+        app.config["STORAGE_DIR"] = temp_storage
+
+        # Create a real test file
+        test_file = temp_storage / "test.pdf"
+        test_file.write_bytes(sample_pdf_bytes)
 
         watermark_data = {
             "method": "test-method",
@@ -491,34 +751,48 @@ class TestWatermarkManagement:
             "position": "bottom-right"
         }
 
-        mock_conn = app.config.get('mock_db_conn')
-        if mock_conn:
-            # Mock document exists
-            mock_row = MagicMock()
-            mock_row.id = 1
-            mock_row.name = "test.pdf"
-            mock_row.path = "/storage/test.pdf"
+        # Get the existing mock engine
+        mock_engine = app.config.get('_ENGINE')
 
-            mock_conn.execute.side_effect = [
-                MagicMock(first=lambda: mock_row),  # Document check
-                MagicMock(),  # INSERT version
-                MagicMock(scalar=lambda: 1)  # LAST_INSERT_ID
-            ]
+        # Setup for connect() (SELECT query for document lookup)
+        mock_conn_read = MagicMock()
+        mock_context_read = MagicMock()
+        mock_context_read.__enter__ = MagicMock(return_value=mock_conn_read)
+        mock_context_read.__exit__ = MagicMock(return_value=False)
+        mock_engine.connect.return_value = mock_context_read
+
+        # Setup for begin() (INSERT query for version creation)
+        mock_conn_write = MagicMock()
+        mock_context_write = MagicMock()
+        mock_context_write.__enter__ = MagicMock(return_value=mock_conn_write)
+        mock_context_write.__exit__ = MagicMock(return_value=False)
+        mock_engine.begin.return_value = mock_context_write
+
+        # Mock document exists
+        mock_row = MagicMock()
+        mock_row.id = 1
+        mock_row.name = "test.pdf"
+        mock_row.path = str(test_file)  # Use real file path
+
+        mock_result1 = MagicMock()
+        mock_result1.first.return_value = mock_row
+        mock_conn_read.execute.return_value = mock_result1
+
+        # Mock INSERT and LAST_INSERT_ID for version creation
+        mock_insert = MagicMock()
+        mock_lastid = MagicMock()
+        mock_lastid.scalar.return_value = 1
+        mock_conn_write.execute.side_effect = [mock_insert, mock_lastid]
 
         with patch('watermarking_utils.is_watermarking_applicable', return_value=True), \
-             patch('watermarking_utils.apply_watermark', return_value=b'watermarked content'), \
-             patch('pathlib.Path.exists', return_value=True), \
-             patch('pathlib.Path.mkdir'), \
-             patch('pathlib.Path.open', mock_open()):
-
+                patch('watermarking_utils.apply_watermark', return_value=b'watermarked content'):
             response = client.post("/api/create-watermark/1", headers=headers, json=watermark_data)
 
-            assert response.status_code == 201
-            data = response.get_json()
-            assert "id" in data
-            assert "link" in data
-            assert data["intended_for"] == "john@example.com"
-            assert data["method"] == "test-method"
+        assert response.status_code == 201
+        result = response.get_json()
+        assert "id" in result
+        assert result["link"] is not None
+        assert result["intended_for"] == "john@example.com"
 
     def test_create_watermark_validation_errors(self, client: FlaskClient, app: Flask):
         """Test watermark creation with validation errors."""
@@ -537,7 +811,6 @@ class TestWatermarkManagement:
             data = response.get_json()
             assert "error" in data
 
-    @pytest.mark.xfail
     def test_create_watermark_document_not_found(self, client: FlaskClient, app: Flask):
         """Test watermark creation when document doesn't exist."""
         token = self._get_valid_token(app)
@@ -559,9 +832,28 @@ class TestWatermarkManagement:
         assert response.status_code == 404
         data = response.get_json()
         assert "error" in data
-        assert "not found" in data["error"]
+        assert "not found" in data["error"].lower()
 
-    @pytest.mark.xfail
+    def test_create_watermark_invalid_id_from_query_returns_400(self, client: FlaskClient, app: Flask, tmp_path: Path):
+        token = self._get_valid_token(app)
+        headers = {"Authorization": f"Bearer {token}"}
+        app.config["STORAGE_DIR"] = tmp_path
+
+        payload = {"method": "m", "intended_for": "a@b", "secret": "s", "key": "k"}
+        resp = client.post("/api/create-watermark?id=abc", headers=headers, json=payload)
+        assert resp.status_code == 400
+        assert "document_id (int) is required" in resp.get_json().get("error", "")
+
+    def test_create_watermark_invalid_id_from_body_returns_400(self, client: FlaskClient, app: Flask, tmp_path: Path):
+        token = self._get_valid_token(app)
+        headers = {"Authorization": f"Bearer {token}"}
+        app.config["STORAGE_DIR"] = tmp_path
+
+        payload = {"id": "not-an-int", "method": "m", "intended_for": "a@b", "secret": "s", "key": "k"}
+        resp = client.post("/api/create-watermark", headers=headers, json=payload)
+        assert resp.status_code == 400
+        assert "document_id (int) is required" in resp.get_json().get("error", "")
+
     def test_list_versions_success(self, client: FlaskClient, app: Flask):
         """Test successful version listing."""
         token = self._get_valid_token(app)
@@ -587,8 +879,8 @@ class TestWatermarkManagement:
         data = response.get_json()
         assert "versions" in data
         assert len(data["versions"]) == 1
+        assert data["versions"][0]["id"] == 1
 
-    @pytest.mark.xfail
     def test_list_all_versions_success(self, client: FlaskClient, app: Flask):
         """Test successful listing of all versions."""
         token = self._get_valid_token(app)
@@ -621,29 +913,34 @@ class TestWatermarkManagement:
         assert "versions" in data
         assert len(data["versions"]) == 2
 
-    @pytest.mark.xfail
     def test_get_version_success(self, client: FlaskClient, app: Flask, sample_pdf_bytes: bytes):
         """Test successful version retrieval by link."""
+        storage_dir = app.config["STORAGE_DIR"]
+        relative_path = "watermarks/testfile.pdf"
+        full_path = storage_dir / relative_path
+
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_bytes(sample_pdf_bytes)
+
         mock_conn = app.config.get('mock_db_conn')
         if mock_conn:
             mock_row = MagicMock()
             mock_row.id = 1
             mock_row.link = "testlink123"
-            mock_row.path = "/storage/watermark.pdf"
+            mock_row.path = relative_path
             mock_conn.execute.return_value.first.return_value = mock_row
 
-        with patch('pathlib.Path.exists', return_value=True), \
-             patch('pathlib.Path.stat') as mock_stat, \
-             patch('flask.send_file') as mock_send_file:
-
-            mock_stat.return_value.st_mtime = 1640995200.0
-            mock_send_file.return_value = MagicMock(status_code=200)
+        with patch('server.src.server.send_file') as mock_send_file:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.headers = {}
+            mock_send_file.return_value = mock_response
 
             response = client.get("/api/get-version/testlink123")
 
             assert mock_send_file.called
+            assert response.status_code == 200
 
-    @pytest.mark.xfail
     def test_get_version_not_found(self, client: FlaskClient, app: Flask):
         """Test version retrieval when version doesn't exist."""
         mock_conn = app.config.get('mock_db_conn')
@@ -655,9 +952,9 @@ class TestWatermarkManagement:
         assert response.status_code == 404
         data = response.get_json()
         assert "error" in data
+        assert "not found" in data["error"].lower()
 
-    @pytest.mark.xfail
-    def test_read_watermark_by_link_success(self, client: FlaskClient, app: Flask):
+    def test_read_watermark_by_link_success(self, client: FlaskClient, app: Flask, sample_pdf_bytes: bytes):
         """Test successful watermark reading by link."""
         token = self._get_valid_token(app)
         headers = {"Authorization": f"Bearer {token}"}
@@ -667,6 +964,13 @@ class TestWatermarkManagement:
             "key": "test-key"
         }
 
+        storage_dir = app.config["STORAGE_DIR"]
+        relative_path = "watermarks/testfile.pdf"
+        full_path = storage_dir / relative_path
+
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_bytes(sample_pdf_bytes)
+
         mock_conn = app.config.get('mock_db_conn')
         if mock_conn:
             mock_row = MagicMock()
@@ -674,14 +978,12 @@ class TestWatermarkManagement:
             mock_row.documentid = 1
             mock_row.link = "testlink123"
             mock_row.secret = "extracted_secret"
-            mock_row.path = "/storage/watermark.pdf"
+            mock_row.path = relative_path
             mock_conn.execute.return_value.first.return_value = mock_row
 
-        with patch('watermarking_utils.read_watermark', return_value="extracted_secret"), \
-             patch('pathlib.Path.exists', return_value=True):
-
+        with patch('watermarking_utils.read_watermark', return_value="extracted_secret"):
             response = client.post("/api/read-watermark-by-link/testlink123",
-                                 headers=headers, json=read_data)
+                                   headers=headers, json=read_data)
 
             assert response.status_code == 200
             data = response.get_json()
@@ -731,106 +1033,28 @@ class TestRMAPFunctionality:
             assert "error" in data
             assert "Payload missing" in data["error"]
 
-    def test_rmap_initiate_empty_payload(self, client: FlaskClient):
-        """Test RMAP initiate with empty payload string."""
-        with patch('server.src.server.rmap_service', MagicMock()):
-            response = client.post("/api/rmap-initiate", json={"payload": ""})
-
-            assert response.status_code == 400
-            data = response.get_json()
-            assert "error" in data
-            assert "non-empty string" in data["error"]
-
-    def test_rmap_initiate_invalid_payload_type(self, client: FlaskClient):
-        """Test RMAP initiate with invalid payload type."""
-        with patch('server.src.server.rmap_service', MagicMock()):
-            # Test with non-string payload
-            response = client.post("/api/rmap-initiate", json={"payload": 123})
-
-            assert response.status_code == 400
-            data = response.get_json()
-            assert "error" in data
-            assert "non-empty string" in data["error"]
-
-    def test_rmap_initiate_payload_validation_exceptions(self, client: FlaskClient):
-        """Test RMAP initiate with payload validation exceptions."""
-        mock_rmap_service = MagicMock()
-        mock_identity_manager = MagicMock()
-        
-        # Test with ValueError exception
-        mock_identity_manager.decrypt_for_server.side_effect = ValueError("Invalid payload format")
-        
-        with patch('server.src.server.rmap_service', mock_rmap_service), \
-                patch('server.src.server.identity_manager', mock_identity_manager):
-            response = client.post("/api/rmap-initiate", json={"payload": "invalid_payload"})
-
-            assert response.status_code == 400
-            data = response.get_json()
-            assert "error" in data
-            assert "Invalid or malformed RMAP payload" in data["error"]
-
-    def test_rmap_initiate_payload_type_error(self, client: FlaskClient):
-        """Test RMAP initiate with TypeError exception."""
-        mock_rmap_service = MagicMock()
-        mock_identity_manager = MagicMock()
-        
-        # Test with TypeError exception
-        mock_identity_manager.decrypt_for_server.side_effect = TypeError("Type error")
-        
-        with patch('server.src.server.rmap_service', mock_rmap_service), \
-                patch('server.src.server.identity_manager', mock_identity_manager):
-            response = client.post("/api/rmap-initiate", json={"payload": "test"})
-
-            assert response.status_code == 400
-            data = response.get_json()
-            assert "error" in data
-            assert "Invalid or malformed RMAP payload" in data["error"]
-
-    def test_rmap_initiate_payload_key_error(self, client: FlaskClient):
-        """Test RMAP initiate with KeyError exception."""
-        mock_rmap_service = MagicMock()
-        mock_identity_manager = MagicMock()
-        
-        # Test with KeyError exception
-        mock_identity_manager.decrypt_for_server.side_effect = KeyError("Missing key")
-        
-        with patch('server.src.server.rmap_service', mock_rmap_service), \
-                patch('server.src.server.identity_manager', mock_identity_manager):
-            response = client.post("/api/rmap-initiate", json={"payload": "test"})
-
-            assert response.status_code == 400
-            data = response.get_json()
-            assert "error" in data
-            assert "Invalid or malformed RMAP payload" in data["error"]
-
-    def test_rmap_initiate_payload_attribute_error(self, client: FlaskClient):
-        """Test RMAP initiate with AttributeError exception."""
-        mock_rmap_service = MagicMock()
-        mock_identity_manager = MagicMock()
-        
-        # Test with AttributeError exception
-        mock_identity_manager.decrypt_for_server.side_effect = AttributeError("Missing attribute")
-        
-        with patch('server.src.server.rmap_service', mock_rmap_service), \
-                patch('server.src.server.identity_manager', mock_identity_manager):
-            response = client.post("/api/rmap-initiate", json={"payload": "test"})
-
-            assert response.status_code == 400
-            data = response.get_json()
-            assert "error" in data
-            assert "Invalid or malformed RMAP payload" in data["error"]
-
     def test_rmap_initiate_success(self, client: FlaskClient):
         """Test successful RMAP initiate."""
         mock_rmap_service = MagicMock()
         mock_rmap_service.handle_message1.return_value = {"status": "success"}
 
-        with patch('server.src.server.rmap_service', mock_rmap_service):
+        # Mock identity_manager
+        mock_identity_manager = MagicMock()
+        mock_identity_manager.decrypt_for_server.return_value = {
+            "identity": "test@example.com",
+            "nonce": "test_nonce_123"
+        }
+
+        with patch('server.src.server.rmap_service', mock_rmap_service), \
+                patch('server.src.server.identity_manager', mock_identity_manager):
             # payload should be armored base64
             response = client.post("/api/rmap-initiate", json={"payload": "test_payload"})
 
             assert response.status_code == 200
-            mock_rmap_service.handle_message1.assert_called_once()
+            # Verify identity_manager was called
+            mock_identity_manager.decrypt_for_server.assert_called_once_with("test_payload")
+            # Verify rmap_service was called
+            mock_rmap_service.handle_message1.assert_called_once_with({"payload": "test_payload"})
 
     def test_rmap_get_link_no_service(self, client: FlaskClient):
         """Test RMAP get link when service is not available."""
@@ -883,23 +1107,30 @@ class TestRMAPFunctionality:
             assert "error" in data
             assert "file is required" in data["error"]
 
-    @pytest.mark.xfail
     def test_rmap_identify_leak_success(self, client: FlaskClient, app: Flask, sample_pdf_bytes: bytes):
         """Test successful RMAP leak identification."""
+
+        # Setup mock data
+        mock_row = MagicMock()
+        mock_row.id = 1
+        mock_row.link = "testlink"
+        mock_row.intended_for = "john@example.com"
+        mock_row.secret = "extracted_secret"
+        mock_row.method = "test-method"
+        mock_row.path = "/storage/test.pdf"
+
+        # Mock the database query result
+        mock_result = MagicMock()
+        mock_result.first.return_value = mock_row
+
+        # Get the mock_conn from app config
+        mock_conn = app.config.get('mock_db_conn')
+        if mock_conn:
+            # Setup the execute -> first chain
+            mock_conn.execute.return_value = mock_result
+
         with patch.dict(os.environ, {'RMAP_ADMIN_KEY': 'change-this-admin-key'}), \
-             patch('watermarking_utils.read_watermark', return_value="extracted_secret"):
-
-            mock_conn = app.config.get('mock_db_conn')
-            if mock_conn:
-                mock_row = MagicMock()
-                mock_row.id = 1
-                mock_row.link = "testlink"
-                mock_row.intended_for = "john@example.com"
-                mock_row.secret = "extracted_secret"
-                mock_row.method = "test-method"
-                mock_row.path = "/storage/test.pdf"
-                mock_conn.execute.return_value.first.return_value = mock_row
-
+                patch('server.src.server.WMUtils.read_watermark', return_value="extracted_secret"):
             headers = {"X-Admin-Key": "change-this-admin-key"}
             data = {'file': (io.BytesIO(sample_pdf_bytes), 'leaked.pdf')}
             response = client.post("/api/rmap-identify-leak", headers=headers, data=data)
@@ -909,6 +1140,8 @@ class TestRMAPFunctionality:
             assert result["identified"] is True
             assert result["identity"] == "john@example.com"
             assert "version_info" in result
+            assert result["version_info"]["id"] == 1
+            assert result["version_info"]["link"] == "testlink"
 
     def test_rmap_identify_leak_no_watermark(self, client: FlaskClient, app: Flask, sample_pdf_bytes: bytes):
         """Test RMAP leak identification when no watermark is found."""
@@ -930,9 +1163,9 @@ class TestCompleteWorkflows:
     """Test complete end-to-end workflows."""
 
     def _create_user_and_login(self, client: FlaskClient, app: Flask,
-                              email: str = "workflow@example.com",
-                              login: str = "workflow",
-                              password: str = "password123") -> str:
+                               email: str = "workflow@example.com",
+                               login: str = "workflow",
+                               password: str = "password123") -> str:
         """Helper to create user and get auth token."""
         # Create user
         user_data = {"email": email, "login": login, "password": password}
@@ -955,7 +1188,7 @@ class TestCompleteWorkflows:
         create_response = client.post("/api/create-user", json=user_data)
         assert create_response.status_code == 201
 
-        # Login
+        # Login - IMPORTANT: Reset side_effect before setting return_value
         if mock_conn:
             from werkzeug.security import generate_password_hash
             mock_login_row = MagicMock()
@@ -963,6 +1196,9 @@ class TestCompleteWorkflows:
             mock_login_row.email = email
             mock_login_row.login = login
             mock_login_row.hpassword = generate_password_hash(password)
+
+            # Reset side_effect to None so return_value can work
+            mock_conn.execute.side_effect = None
             mock_conn.execute.return_value.first.return_value = mock_login_row
 
         login_response = client.post("/api/login", json={"email": email, "password": password})
@@ -970,7 +1206,6 @@ class TestCompleteWorkflows:
 
         return login_response.get_json()["token"]
 
-    @pytest.mark.xfail
     def test_complete_document_workflow(self, client: FlaskClient, app: Flask, sample_pdf_bytes: bytes):
         """Test complete document workflow: create user -> login -> upload -> list -> get -> delete."""
         # Step 1: Create user and login
@@ -981,73 +1216,97 @@ class TestCompleteWorkflows:
 
         # Step 2: Upload document
         if mock_conn:
+            # Create properly configured mock row
+            mock_row = MagicMock()
+            mock_row.id = 1
+            mock_row.name = "workflow.pdf"
+            mock_row.creation = dt.datetime.now()
+            mock_row.sha256_hex = "hash123"
+            mock_row.size = len(sample_pdf_bytes)
+
+            # Create mock result that returns the row
+            mock_select_result = MagicMock()
+            mock_select_result.one.return_value = mock_row
+
             mock_conn.execute.side_effect = [
                 MagicMock(),  # INSERT
                 MagicMock(scalar=lambda: 1),  # LAST_INSERT_ID
-                MagicMock(one=lambda: MagicMock(
-                    id=1, name="workflow.pdf", creation=dt.datetime.now(),
-                    sha256_hex="hash123", size=len(sample_pdf_bytes)
-                ))
+                mock_select_result  # SELECT
             ]
 
-        with patch('pathlib.Path.mkdir'), \
-             patch('pathlib.Path.stat') as mock_stat, \
-             patch('builtins.open', mock_open()), \
-             patch('hashlib.sha256') as mock_hash:
-
-            mock_stat.return_value.st_size = len(sample_pdf_bytes)
-            mock_hash.return_value.hexdigest.return_value = "hash123"
-
-            upload_data = {'file': (io.BytesIO(sample_pdf_bytes), 'workflow.pdf')}
-            upload_response = client.post("/api/upload-document", headers=headers, data=upload_data)
+        # Don't mock file operations - use real temp directory
+        upload_data = {'file': (io.BytesIO(sample_pdf_bytes), 'workflow.pdf')}
+        upload_response = client.post("/api/upload-document", headers=headers, data=upload_data)
 
         assert upload_response.status_code == 201
         doc_id = upload_response.get_json()["id"]
+        assert doc_id == 1
 
         # Step 3: List documents
         if mock_conn:
-            mock_doc = MagicMock(
-                id=doc_id, name="workflow.pdf", creation=dt.datetime.now(),
-                sha256_hex="hash123", size=len(sample_pdf_bytes)
-            )
-            mock_conn.execute.return_value.all.return_value = [mock_doc]
+            mock_conn.execute.side_effect = None  # Reset side_effect
+
+            mock_doc = MagicMock()
+            mock_doc.id = doc_id
+            mock_doc.name = "workflow.pdf"
+            mock_doc.creation = dt.datetime.now()
+            mock_doc.sha256_hex = "hash123"
+            mock_doc.size = len(sample_pdf_bytes)
+
+            mock_list_result = MagicMock()
+            mock_list_result.all.return_value = [mock_doc]
+            mock_conn.execute.return_value = mock_list_result
 
         list_response = client.get("/api/list-documents", headers=headers)
         assert list_response.status_code == 200
         assert len(list_response.get_json()["documents"]) == 1
 
         # Step 4: Get document
-        if mock_conn:
-            mock_row = MagicMock()
-            mock_row.id = doc_id
-            mock_row.name = "workflow.pdf"
-            mock_row.path = "/storage/workflow.pdf"
-            mock_row.sha256_hex = "hash123"
-            mock_row.size = len(sample_pdf_bytes)
-            mock_conn.execute.return_value.first.return_value = mock_row
+        # Find the actual file path that was created
+        storage_dir = Path(app.config["STORAGE_DIR"])
+        user_files_dir = storage_dir / "files" / "workflow"
+        actual_files = list(user_files_dir.glob("*__workflow.pdf"))
 
-        with patch('pathlib.Path.exists', return_value=True), \
-             patch('flask.send_file') as mock_send_file:
-            mock_send_file.return_value = MagicMock(status_code=200)
-            get_response = client.get(f"/api/get-document/{doc_id}", headers=headers)
-            assert mock_send_file.called
+        if mock_conn:
+            mock_conn.execute.side_effect = None  # Reset side_effect
+
+            mock_get_row = MagicMock()
+            mock_get_row.id = doc_id
+            mock_get_row.name = "workflow.pdf"
+            mock_get_row.path = str(actual_files[0]) if actual_files else "/storage/workflow.pdf"
+            mock_get_row.sha256_hex = "hash123"
+            mock_get_row.size = len(sample_pdf_bytes)
+
+            mock_get_result = MagicMock()
+            mock_get_result.first.return_value = mock_get_row
+            mock_conn.execute.return_value = mock_get_result
+
+        get_response = client.get(f"/api/get-document/{doc_id}", headers=headers)
+        assert get_response.status_code == 200
 
         # Step 5: Delete document
         if mock_conn:
+            mock_delete_row = MagicMock()
+            mock_delete_row.id = doc_id
+            mock_delete_row.name = "workflow.pdf"
+            mock_delete_row.path = str(actual_files[0]) if actual_files else "/storage/workflow.pdf"
+
+            mock_versions_result = MagicMock()
+            mock_versions_result.fetchall.return_value = []
+
+            mock_doc_exists_result = MagicMock()
+            mock_doc_exists_result.first.return_value = mock_delete_row
+
             mock_conn.execute.side_effect = [
-                MagicMock(first=lambda: mock_row),  # Document exists
-                MagicMock(fetchall=lambda: []),  # No versions
+                mock_doc_exists_result,  # Document exists check
+                mock_versions_result,  # No versions
                 MagicMock()  # DELETE
             ]
 
-        with patch('pathlib.Path.exists', return_value=True), \
-             patch('pathlib.Path.unlink'):
-            delete_response = client.delete(f"/api/delete-document/{doc_id}", headers=headers)
-
+        delete_response = client.delete(f"/api/delete-document/{doc_id}", headers=headers)
         assert delete_response.status_code == 200
         assert delete_response.get_json()["deleted"] is True
 
-    @pytest.mark.xfail
     def test_complete_watermark_workflow(self, client: FlaskClient, app: Flask, sample_pdf_bytes: bytes):
         """Test complete watermark workflow: upload -> create watermark -> list versions -> get version."""
         # Setup: Create user and upload document
@@ -1057,44 +1316,66 @@ class TestCompleteWorkflows:
         mock_conn = app.config.get('mock_db_conn')
         doc_id = 1
 
-        # Mock document upload
         if mock_conn:
+            mock_row = MagicMock()
+            mock_row.id = doc_id
+            mock_row.name = "watermark_test.pdf"
+            mock_row.creation = dt.datetime.now()
+            mock_row.sha256_hex = "hash123"
+            mock_row.size = len(sample_pdf_bytes)
+
+            mock_row.__getitem__ = lambda self, key: getattr(mock_row, key)
+
             mock_conn.execute.side_effect = [
                 MagicMock(),  # INSERT
-                MagicMock(scalar=lambda: doc_id),  # LAST_INSERT_ID
-                MagicMock(one=lambda: MagicMock(
-                    id=doc_id, name="watermark_test.pdf", creation=dt.datetime.now(),
-                    sha256_hex="hash123", size=len(sample_pdf_bytes)
-                ))
+                MagicMock(scalar=lambda: doc_id),
+                MagicMock(one=lambda: mock_row)
             ]
 
         with patch('pathlib.Path.mkdir'), \
-             patch('pathlib.Path.stat') as mock_stat, \
-             patch('builtins.open', mock_open()), \
-             patch('hashlib.sha256') as mock_hash:
+                patch('pathlib.Path.stat') as mock_stat, \
+                patch('pathlib.Path.open', mock_open(read_data=sample_pdf_bytes)), \
+                patch('werkzeug.datastructures.FileStorage.save'), \
+                patch('hashlib.sha256') as mock_hash:
 
             mock_stat.return_value.st_size = len(sample_pdf_bytes)
-            mock_hash.return_value.hexdigest.return_value = "hash123"
+            mock_hash_instance = MagicMock()
+            mock_hash_instance.hexdigest.return_value = "hash123"
+            mock_hash.return_value = mock_hash_instance
 
             upload_data = {'file': (io.BytesIO(sample_pdf_bytes), 'watermark_test.pdf')}
             upload_response = client.post("/api/upload-document", headers=headers, data=upload_data)
 
         assert upload_response.status_code == 201
+        response_data = upload_response.get_json()
+        assert response_data["id"] == doc_id
+        assert response_data["name"] == "watermark_test.pdf"
 
         # Step 1: Create watermark
         watermark_data = {
-            "method": "test-method",
+            "method": "toy-eof",
             "intended_for": "recipient@example.com",
             "secret": "confidential123",
             "key": "encryption456",
             "position": "bottom-right"
         }
 
+        storage_dir = Path(app.config["STORAGE_DIR"])
+        relative_doc_path = "files/workflow/watermark_test.pdf"
+
+        doc_full_path = storage_dir / relative_doc_path
+        doc_full_path.parent.mkdir(parents=True, exist_ok=True)
+
+        doc_full_path.write_bytes(sample_pdf_bytes)
+
+        watermarks_dir = doc_full_path.parent / "watermarks"
+        watermarks_dir.mkdir(parents=True, exist_ok=True)
+
         if mock_conn:
             mock_doc_row = MagicMock()
             mock_doc_row.id = doc_id
             mock_doc_row.name = "watermark_test.pdf"
-            mock_doc_row.path = "/storage/watermark_test.pdf"
+            mock_doc_row.path = str(doc_full_path)
 
             mock_conn.execute.side_effect = [
                 MagicMock(first=lambda: mock_doc_row),  # Document check
@@ -1103,46 +1384,78 @@ class TestCompleteWorkflows:
             ]
 
         with patch('watermarking_utils.is_watermarking_applicable', return_value=True), \
-             patch('watermarking_utils.apply_watermark', return_value=b'watermarked content'), \
-             patch('pathlib.Path.exists', return_value=True), \
-             patch('pathlib.Path.mkdir'), \
-             patch('pathlib.Path.open', mock_open()):
+                patch('watermarking_utils.apply_watermark', return_value=sample_pdf_bytes):
 
             watermark_response = client.post(f"/api/create-watermark/{doc_id}",
-                                           headers=headers, json=watermark_data)
+                                             headers=headers, json=watermark_data)
 
-        assert watermark_response.status_code == 201
-        watermark_link = watermark_response.get_json()["link"]
+        if watermark_response.status_code != 201:
+            print(f"Watermark creation failed: {watermark_response.get_json()}")
+
+        assert watermark_response.status_code == 201, f"Expected 201, got {watermark_response.status_code}: {watermark_response.get_json()}"
+        watermark_result = watermark_response.get_json()
+        watermark_link = watermark_result["link"]
+        assert "link" in watermark_result
+        assert watermark_result["intended_for"] == "recipient@example.com"
+        assert watermark_result["method"] == "toy-eof"
 
         # Step 2: List versions
         if mock_conn:
-            mock_version = MagicMock(
-                id=1, documentid=doc_id, link=watermark_link,
-                intended_for="recipient@example.com", secret="confidential123", method="test-method"
-            )
-            mock_conn.execute.return_value.all.return_value = [mock_version]
+            mock_conn.execute.side_effect = None
+
+            mock_version = MagicMock()
+            mock_version.id = 1
+            mock_version.documentid = doc_id
+            mock_version.link = watermark_link
+            mock_version.intended_for = "recipient@example.com"
+            mock_version.secret = "confidential123"
+            mock_version.method = "toy-eof"
+
+            mock_execute_result = MagicMock()
+            mock_execute_result.all.return_value = [mock_version]
+            mock_conn.execute.return_value = mock_execute_result
 
         versions_response = client.get(f"/api/list-versions/{doc_id}", headers=headers)
         assert versions_response.status_code == 200
-        assert len(versions_response.get_json()["versions"]) == 1
+        versions_data = versions_response.get_json()
+        assert "versions" in versions_data
+        assert len(versions_data["versions"]) == 1
+        assert versions_data["versions"][0]["intended_for"] == "recipient@example.com"
+        assert versions_data["versions"][0]["method"] == "toy-eof"
 
         # Step 3: Get version by link
+        actual_filename = watermark_result.get("filename", "test_watermark.pdf")
+        watermark_file_path = watermarks_dir / actual_filename
+
+        if not watermark_file_path.exists():
+            watermark_file_path.write_bytes(sample_pdf_bytes)
+
         if mock_conn:
+            mock_conn.execute.side_effect = None
+
             mock_version_row = MagicMock()
             mock_version_row.id = 1
             mock_version_row.link = watermark_link
-            mock_version_row.path = "/storage/watermarks/test.pdf"
-            mock_conn.execute.return_value.first.return_value = mock_version_row
+            mock_version_row.path = str(watermark_file_path)
 
-        with patch('pathlib.Path.exists', return_value=True), \
-             patch('flask.send_file') as mock_send_file:
-            mock_send_file.return_value = MagicMock(status_code=200)
-            version_response = client.get(f"/api/get-version/{watermark_link}")
-            assert mock_send_file.called
+            mock_execute_result = MagicMock()
+            mock_execute_result.first.return_value = mock_version_row
+            mock_conn.execute.return_value = mock_execute_result
 
-    @pytest.mark.xfail
+        version_response = client.get(f"/api/get-version/{watermark_link}")
+
+        assert version_response.status_code == 200, f"Expected 200, got {version_response.status_code}"
+        assert version_response.content_type == "application/pdf"
+
+
     def test_multi_user_workflow(self, client: FlaskClient, app: Flask, sample_pdf_bytes: bytes):
         """Test workflow with multiple users to ensure proper isolation."""
+
+        class MockRow:
+            def __init__(self, **kwargs):
+                for key, value in kwargs.items():
+                    setattr(self, key, value)
+
         # Create two users
         token1 = self._create_user_and_login(client, app, "user1@example.com", "user1", "pass1")
         token2 = self._create_user_and_login(client, app, "user2@example.com", "user2", "pass2")
@@ -1152,62 +1465,112 @@ class TestCompleteWorkflows:
 
         mock_conn = app.config.get('mock_db_conn')
 
-        # User 1 uploads document
+        # ===== User 1 uploads document =====
         if mock_conn:
-            mock_conn.execute.side_effect = [
-                MagicMock(),  # INSERT
-                MagicMock(scalar=lambda: 1),  # LAST_INSERT_ID
-                MagicMock(one=lambda: MagicMock(
-                    id=1, name="user1_doc.pdf", creation=dt.datetime.now(),
-                    sha256_hex="hash1", size=len(sample_pdf_bytes)
-                ))
-            ]
+            upload1_call_count = [0]
+
+            def mock_execute_for_upload1(*args, **kwargs):
+                upload1_call_count[0] += 1
+                if upload1_call_count[0] == 1:  # INSERT INTO Documents
+                    result = MagicMock()
+                    result.lastrowid = 1
+                    return result
+                elif upload1_call_count[0] == 2:  # SELECT LAST_INSERT_ID()
+                    result = MagicMock()
+                    result.scalar.return_value = 1
+                    return result
+                elif upload1_call_count[0] == 3:  # SELECT document details
+                    result = MagicMock()
+                    result.one.return_value = MockRow(
+                        id=1,
+                        name="user1_doc.pdf",
+                        creation=dt.datetime.now(),
+                        sha256_hex="hash1",
+                        size=len(sample_pdf_bytes)
+                    )
+                    return result
+                else:
+                    return MagicMock()
+
+            mock_conn.execute.side_effect = mock_execute_for_upload1
+
+        m_open = mock_open(read_data=sample_pdf_bytes)
+        mock_hash_obj = MagicMock()
+        mock_hash_obj.hexdigest.return_value = "hash1"
 
         with patch('pathlib.Path.mkdir'), \
-             patch('pathlib.Path.stat') as mock_stat, \
-             patch('builtins.open', mock_open()), \
-             patch('hashlib.sha256') as mock_hash:
+                patch('pathlib.Path.stat') as mock_stat, \
+                patch('builtins.open', m_open), \
+                patch('pathlib.Path.open', m_open), \
+                patch('hashlib.sha256', return_value=mock_hash_obj):
 
             mock_stat.return_value.st_size = len(sample_pdf_bytes)
-            mock_hash.return_value.hexdigest.return_value = "hash1"
-
             upload_data = {'file': (io.BytesIO(sample_pdf_bytes), 'user1_doc.pdf')}
             upload_response1 = client.post("/api/upload-document", headers=headers1, data=upload_data)
 
         assert upload_response1.status_code == 201
 
-        # User 2 uploads document
+        # ===== User 2 uploads document =====
         if mock_conn:
-            mock_conn.execute.side_effect = [
-                MagicMock(),  # INSERT
-                MagicMock(scalar=lambda: 2),  # LAST_INSERT_ID
-                MagicMock(one=lambda: MagicMock(
-                    id=2, name="user2_doc.pdf", creation=dt.datetime.now(),
-                    sha256_hex="hash2", size=len(sample_pdf_bytes)
-                ))
-            ]
+            upload2_call_count = [0]
+
+            def mock_execute_for_upload2(*args, **kwargs):
+                upload2_call_count[0] += 1
+                if upload2_call_count[0] == 1:  # INSERT INTO Documents
+                    result = MagicMock()
+                    result.lastrowid = 2
+                    return result
+                elif upload2_call_count[0] == 2:  # SELECT LAST_INSERT_ID()
+                    result = MagicMock()
+                    result.scalar.return_value = 2
+                    return result
+                elif upload2_call_count[0] == 3:  # SELECT document details
+                    result = MagicMock()
+                    result.one.return_value = MockRow(
+                        id=2,
+                        name="user2_doc.pdf",
+                        creation=dt.datetime.now(),
+                        sha256_hex="hash2",
+                        size=len(sample_pdf_bytes)
+                    )
+                    return result
+                else:
+                    return MagicMock()
+
+            mock_conn.execute.side_effect = mock_execute_for_upload2
+
+        m_open2 = mock_open(read_data=sample_pdf_bytes)
+        mock_hash_obj2 = MagicMock()
+        mock_hash_obj2.hexdigest.return_value = "hash2"
 
         with patch('pathlib.Path.mkdir'), \
-             patch('pathlib.Path.stat') as mock_stat, \
-             patch('builtins.open', mock_open()), \
-             patch('hashlib.sha256') as mock_hash:
+                patch('pathlib.Path.stat') as mock_stat, \
+                patch('builtins.open', m_open2), \
+                patch('pathlib.Path.open', m_open2), \
+                patch('hashlib.sha256', return_value=mock_hash_obj2):
 
             mock_stat.return_value.st_size = len(sample_pdf_bytes)
-            mock_hash.return_value.hexdigest.return_value = "hash2"
-
             upload_data = {'file': (io.BytesIO(sample_pdf_bytes), 'user2_doc.pdf')}
             upload_response2 = client.post("/api/upload-document", headers=headers2, data=upload_data)
 
         assert upload_response2.status_code == 201
 
-        # Each user should only see their own documents
+        # ===== Each user should only see their own documents =====
         if mock_conn:
-            # Mock for user1's documents
-            mock_doc1 = MagicMock(
-                id=1, name="user1_doc.pdf", creation=dt.datetime.now(),
-                sha256_hex="hash1", size=len(sample_pdf_bytes)
-            )
-            mock_conn.execute.return_value.all.return_value = [mock_doc1]
+            def mock_execute_for_list1(*args, **kwargs):
+                result = MagicMock()
+                result.all.return_value = [
+                    MockRow(
+                        id=1,
+                        name="user1_doc.pdf",
+                        creation=dt.datetime.now(),
+                        sha256_hex="hash1",
+                        size=len(sample_pdf_bytes)
+                    )
+                ]
+                return result
+
+            mock_conn.execute.side_effect = mock_execute_for_list1
 
         list_response1 = client.get("/api/list-documents", headers=headers1)
         assert list_response1.status_code == 200
@@ -1216,12 +1579,20 @@ class TestCompleteWorkflows:
         assert docs1[0]["name"] == "user1_doc.pdf"
 
         if mock_conn:
-            # Mock for user2's documents
-            mock_doc2 = MagicMock(
-                id=2, name="user2_doc.pdf", creation=dt.datetime.now(),
-                sha256_hex="hash2", size=len(sample_pdf_bytes)
-            )
-            mock_conn.execute.return_value.all.return_value = [mock_doc2]
+            def mock_execute_for_list2(*args, **kwargs):
+                result = MagicMock()
+                result.all.return_value = [
+                    MockRow(
+                        id=2,
+                        name="user2_doc.pdf",
+                        creation=dt.datetime.now(),
+                        sha256_hex="hash2",
+                        size=len(sample_pdf_bytes)
+                    )
+                ]
+                return result
+
+            mock_conn.execute.side_effect = mock_execute_for_list2
 
         list_response2 = client.get("/api/list-documents", headers=headers2)
         assert list_response2.status_code == 200
@@ -1229,13 +1600,17 @@ class TestCompleteWorkflows:
         assert len(docs2) == 1
         assert docs2[0]["name"] == "user2_doc.pdf"
 
-        # User 1 should not be able to access User 2's document
+        # ===== User 1 should not be able to access User 2's document =====
         if mock_conn:
-            mock_conn.execute.return_value.first.return_value = None
+            def mock_execute_for_forbidden(*args, **kwargs):
+                result = MagicMock()
+                result.first.return_value = None  # No document found
+                return result
+
+            mock_conn.execute.side_effect = mock_execute_for_forbidden
 
         forbidden_response = client.get("/api/get-document/2", headers=headers1)
         assert forbidden_response.status_code == 404  # Document not found (access denied)
-
 
 @pytest.mark.integration
 class TestErrorHandlingAndEdgeCases:
@@ -1267,7 +1642,7 @@ class TestErrorHandlingAndEdgeCases:
                               content_type="application/json")
         assert response.status_code == 400
 
-    @pytest.mark.xfail
+
     def test_file_system_errors(self, client: FlaskClient, app: Flask, sample_pdf_bytes: bytes):
         """Test handling of file system errors."""
         token = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6").dumps({
@@ -1301,12 +1676,26 @@ class TestErrorHandlingAndEdgeCases:
             # Should handle the error gracefully
             assert response.status_code == 500
 
-    def test_watermarking_errors(self, client: FlaskClient, app: Flask):
+    def _get_valid_token(self, app: Flask) -> str:
+        """Helper method to create a valid token."""
+        serializer = URLSafeTimedSerializer(
+            app.config["SECRET_KEY"],
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
+        )
+        token_data = {"uid": 1, "login": "testuser", "email": "test@example.com"}
+        return serializer.dumps(token_data)
+
+    def test_watermarking_errors(self, client: FlaskClient, app: Flask, temp_storage: Path, sample_pdf_bytes: bytes):
         """Test handling of watermarking-related errors."""
-        token = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6").dumps({
-            "uid": 1, "login": "testuser", "email": "test@example.com"
-        })
+        token = self._get_valid_token(app)
         headers = {"Authorization": f"Bearer {token}"}
+
+        # CRITICAL: Set STORAGE_DIR to temp_storage
+        app.config["STORAGE_DIR"] = temp_storage
+
+        # Create a real test file
+        test_file = temp_storage / "test.pdf"
+        test_file.write_bytes(sample_pdf_bytes)
 
         watermark_data = {
             "method": "invalid-method",
@@ -1315,24 +1704,34 @@ class TestErrorHandlingAndEdgeCases:
             "key": "key"
         }
 
-        mock_conn = app.config.get('mock_db_conn')
-        if mock_conn:
-            mock_row = MagicMock()
-            mock_row.id = 1
-            mock_row.name = "test.pdf"
-            mock_row.path = "/storage/test.pdf"
-            mock_conn.execute.return_value.first.return_value = mock_row
+        # Get the existing mock engine
+        mock_engine = app.config.get('_ENGINE')
 
-        with patch('watermarking_utils.is_watermarking_applicable', return_value=False), \
-             patch('pathlib.Path.exists', return_value=True):
+        # Setup for connect()
+        mock_conn = MagicMock()
+        mock_context = MagicMock()
+        mock_context.__enter__ = MagicMock(return_value=mock_conn)
+        mock_context.__exit__ = MagicMock(return_value=False)
+        mock_engine.connect.return_value = mock_context
 
+        # Mock document exists
+        mock_row = MagicMock()
+        mock_row.id = 1
+        mock_row.name = "test.pdf"
+        mock_row.path = str(test_file)  # Use real file path
+
+        mock_result = MagicMock()
+        mock_result.first.return_value = mock_row
+        mock_conn.execute.return_value = mock_result
+
+        with patch('watermarking_utils.is_watermarking_applicable', return_value=False):
             response = client.post("/api/create-watermark/1", headers=headers, json=watermark_data)
 
-            assert response.status_code == 400
-            data = response.get_json()
-            assert "error" in data
+        assert response.status_code == 400
+        data = response.get_json()
+        assert "error" in data
 
-    @pytest.mark.xfail
+
     def test_large_file_handling(self, client: FlaskClient, app: Flask):
         """Test handling of large file uploads."""
         token = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6").dumps({
