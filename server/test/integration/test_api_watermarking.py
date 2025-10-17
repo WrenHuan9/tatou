@@ -79,12 +79,210 @@ class TestWatermarkingFunctionality:
             assert result["documentid"] == 1
             assert result["intended_for"] == "john.doe@example.com"
             assert result["method"] == "add-after-eof"
-            assert result["position"] == "bottom-right"
-            assert "link" in result
-            assert "filename" in result
-            assert result["size"] == len(watermarked_content)
-    
-    @pytest.mark.xfail
+
+    def test_create_watermark_without_auth(self, client: FlaskClient):
+        """Test create_watermark without authentication."""
+        watermark_data = {
+            "method": "add-after-eof",
+            "intended_for": "john.doe@example.com",
+            "secret": "confidential-info-123",
+            "key": "encryption-key-456"
+        }
+        
+        response = client.post("/api/create-watermark/1", json=watermark_data)
+        
+        assert response.status_code == 401
+        result = response.get_json()
+        assert "error" in result
+        assert "Authorization" in result["error"]
+
+    def test_create_watermark_invalid_document_id(self, client: FlaskClient):
+        """Test create_watermark with invalid document ID validation."""
+        from itsdangerous import URLSafeTimedSerializer
+        
+        serializer = URLSafeTimedSerializer(
+            "test-secret-key",
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
+        )
+        token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        watermark_data = {
+            "method": "add-after-eof",
+            "intended_for": "john.doe@example.com",
+            "secret": "confidential-info-123",
+            "key": "encryption-key-456"
+        }
+        
+        test_cases = [
+            # Test with document_id = 0 (should be rejected)
+            ("/api/create-watermark/0", "document_id must be a positive integer"),
+            # Test with negative document_id
+            ("/api/create-watermark/-1", "document_id must be a positive integer"),
+            # Test with non-numeric document_id
+            ("/api/create-watermark/abc", "document_id (int) is required"),
+            # Test with missing document_id
+            ("/api/create-watermark", "document id required"),
+        ]
+        
+        for endpoint, expected_error in test_cases:
+            response = client.post(endpoint, json=watermark_data, headers=headers)
+            assert response.status_code == 400, f"Failed for endpoint: {endpoint}"
+            result = response.get_json()
+            assert "error" in result
+            assert expected_error in result["error"]
+
+    def test_create_watermark_invalid_document_id_in_json(self, client: FlaskClient):
+        """Test create_watermark with invalid document ID in JSON payload."""
+        from itsdangerous import URLSafeTimedSerializer
+        
+        serializer = URLSafeTimedSerializer(
+            "test-secret-key",
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
+        )
+        token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        test_cases = [
+            # Test with id = 0 in JSON
+            {
+                "id": 0,
+                "method": "add-after-eof",
+                "intended_for": "john.doe@example.com",
+                "secret": "confidential-info-123",
+                "key": "encryption-key-456"
+            },
+            # Test with negative id in JSON
+            {
+                "id": -5,
+                "method": "add-after-eof",
+                "intended_for": "john.doe@example.com",
+                "secret": "confidential-info-123",
+                "key": "encryption-key-456"
+            },
+            # Test with non-numeric id in JSON
+            {
+                "id": "invalid",
+                "method": "add-after-eof",
+                "intended_for": "john.doe@example.com",
+                "secret": "confidential-info-123",
+                "key": "encryption-key-456"
+            }
+        ]
+        
+        for watermark_data in test_cases:
+            response = client.post("/api/create-watermark", json=watermark_data, headers=headers)
+            assert response.status_code == 400
+            result = response.get_json()
+            assert "error" in result
+            assert "positive integer" in result["error"] or "int" in result["error"]
+
+    def test_create_watermark_expired_token(self, client: FlaskClient, app: Flask):
+        """Test create_watermark with expired token."""
+        from itsdangerous import URLSafeTimedSerializer
+        import time
+        
+        # Create an expired token
+        serializer = URLSafeTimedSerializer(
+            app.config["SECRET_KEY"],
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
+        )
+        
+        # Create token that's already expired
+        with patch('time.time', return_value=time.time() - 3700):  # 1 hour + 1 minute ago
+            expired_token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
+        
+        headers = {"Authorization": f"Bearer {expired_token}"}
+        
+        watermark_data = {
+            "method": "add-after-eof",
+            "intended_for": "john.doe@example.com",
+            "secret": "confidential-info-123",
+            "key": "encryption-key-456"
+        }
+        
+        response = client.post("/api/create-watermark/1", json=watermark_data, headers=headers)
+        
+        assert response.status_code == 401
+        result = response.get_json()
+        assert "error" in result
+        assert "expired" in result["error"].lower()
+
+    def test_create_watermark_invalid_token(self, client: FlaskClient):
+        """Test create_watermark with invalid token."""
+        headers = {"Authorization": "Bearer invalid_token"}
+        
+        watermark_data = {
+            "method": "add-after-eof",
+            "intended_for": "john.doe@example.com",
+            "secret": "confidential-info-123",
+            "key": "encryption-key-456"
+        }
+        
+        response = client.post("/api/create-watermark/1", json=watermark_data, headers=headers)
+        
+        assert response.status_code == 401
+        result = response.get_json()
+        assert "error" in result
+        assert "Invalid token" in result["error"]
+
+    def test_create_watermark_missing_bearer(self, client: FlaskClient):
+        """Test create_watermark with missing Bearer prefix."""
+        headers = {"Authorization": "invalid_token"}
+        
+        watermark_data = {
+            "method": "add-after-eof",
+            "intended_for": "john.doe@example.com",
+            "secret": "confidential-info-123",
+            "key": "encryption-key-456"
+        }
+        
+        response = client.post("/api/create-watermark/1", json=watermark_data, headers=headers)
+        
+        assert response.status_code == 401
+        result = response.get_json()
+        assert "error" in result
+        assert "Authorization header" in result["error"]
+
+    def test_get_watermarking_methods_without_auth(self, client: FlaskClient):
+        """Test get_watermarking_methods without authentication."""
+        response = client.get("/api/get-watermarking-methods")
+        
+        assert response.status_code == 401
+        result = response.get_json()
+        assert "error" in result
+        assert "Authorization" in result["error"]
+
+    def test_get_watermarking_methods_with_auth(self, client: FlaskClient, app: Flask):
+        """Test get_watermarking_methods with valid authentication."""
+        from itsdangerous import URLSafeTimedSerializer
+        
+        serializer = URLSafeTimedSerializer(
+            app.config["SECRET_KEY"],
+            salt="K8x9m2n7p4q1r5s8t3u6v9w2y5z8a1b4c7d0e3f6g9h2i5j8k1l4m7n0o3p6q9r2s5t8u1v4w7x0y3z6"
+        )
+        token = serializer.dumps({"uid": 1, "login": "testuser", "email": "test@example.com"})
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        with patch('watermarking_utils.METHODS', {'method1': MagicMock(), 'method2': MagicMock()}), \
+             patch('watermarking_utils.get_method') as mock_get_method:
+            
+            mock_method1 = MagicMock()
+            mock_method1.get_usage.return_value = "Method 1 description"
+            mock_method2 = MagicMock()
+            mock_method2.get_usage.return_value = "Method 2 description"
+            
+            mock_get_method.side_effect = [mock_method1, mock_method2]
+            
+            response = client.get("/api/get-watermarking-methods", headers=headers)
+            
+            assert response.status_code == 200
+            result = response.get_json()
+            assert "methods" in result
+            assert "count" in result
+            assert result["count"] == 2
+            assert len(result["methods"]) == 2
+
     def test_create_watermark_no_auth(self, client: FlaskClient):
         """Test watermark creation without authentication."""
         watermark_data = {

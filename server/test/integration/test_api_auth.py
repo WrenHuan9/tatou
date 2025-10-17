@@ -85,26 +85,61 @@ class TestAuthenticationFlow:
             "login": "user1",
             "password": "password123"
         }
+
+        mock_conn = app.config['mock_db_conn']
+
+        # Mock IntegrityError for duplicate email
+        from sqlalchemy.exc import IntegrityError
+        mock_conn.execute.side_effect = IntegrityError("", "", "")
+
+        response = client.post("/api/create-user", json=user_data)
+
+        mock_conn.execute.side_effect = None
+
+        assert response.status_code == 409
+        data = response.get_json()
+        assert "error" in data
+        assert "already exists" in data["error"].lower()
+
+    def test_create_user_with_newlines_should_fail(self, client: FlaskClient):
+        """Test that create-user properly rejects newline characters in login/password (Bug 1 regression test)."""
+        # This test verifies the fix: newline characters should be rejected with 400
+        user_data = {
+            "login": "user\nname",  # Contains newline but has content after strip
+            "password": "pass\nword",  # Contains newline but has content after strip
+            "email": "test@example.com"
+        }
         
-        with patch('sqlalchemy.create_engine') as mock_create_engine:
-            mock_conn = MagicMock()
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            mock_engine.begin.return_value.__enter__.return_value = mock_conn
-            
-            # Mock IntegrityError for duplicate email
-            from sqlalchemy.exc import IntegrityError
-            mock_conn.execute.side_effect = IntegrityError("", "", "")
-            
-            response = client.post("/api/create-user", json=user_data)
-            
-            assert response.status_code == 409
-            data = response.get_json()
-            assert "error" in data
-            assert "already exists" in data["error"]
-    
-    @pytest.mark.xfail
-    def test_login_success(self, client: FlaskClient):
+        response = client.post("/api/create-user", json=user_data)
+        
+        # After fix, it should expect 400 for invalid input
+        assert response.status_code == 400, "Server should return 400 for invalid input with newlines"
+        data = response.get_json()
+        assert "error" in data
+        assert "login can only contain" in data["error"] or "password cannot contain" in data["error"]
+
+    def test_create_watermark_with_id_zero_should_fail(self, client: FlaskClient):
+        """Test that create-watermark properly rejects id=0 (Bug 2 regression test)."""
+        # This test demonstrates the bug: id=0 should cause a 500 error initially
+        # We'll test without authentication first to see the actual bug
+        watermark_data = {
+            "id": 0,
+            "method": "a",
+            "position": "0",
+            "key": "a", 
+            "secret": "a",
+            "intended_for": "a"
+        }
+        
+        response = client.post("/api/create-watermark", json=watermark_data)
+        
+        # After fix, it should expect 400 for invalid id
+        assert response.status_code == 400, "Server should return 400 for invalid id=0"
+        data = response.get_json()
+        assert "error" in data
+        assert "positive integer" in data["error"]
+
+    def test_login_success(self, client: FlaskClient, app: Flask):
         """Test successful login."""
         login_data = {
             "email": "test@example.com",
@@ -265,45 +300,356 @@ class TestAuthenticationFlow:
             "login": "flowtest",
             "password": "flowpassword123"
         }
+
+        mock_conn = app.config['mock_db_conn']
+
+        # Step 1: Create user
+
+        mock_insert_result = MagicMock()
+        mock_insert_result.lastrowid = 1
+
+        mock_select_result = MagicMock()
+        mock_user_row = MagicMock()
+        mock_user_row.id = 1
+        mock_user_row.email = "flowtest@example.com"
+        mock_user_row.login = "flowtest"
+        mock_select_result.one.return_value = mock_user_row
+
+        mock_conn.execute.side_effect = [
+            mock_insert_result,  # INSERT INTO Users
+            mock_select_result  # SELECT from Users (with .one())
+        ]
+
+        create_response = client.post("/api/create-user", json=user_data)
+        assert create_response.status_code == 201, f"Expected 201, got {create_response.status_code}"
+
+        response_data = create_response.get_json()
+        assert response_data["id"] == 1
+        assert response_data["email"] == "flowtest@example.com"
+        assert response_data["login"] == "flowtest"
+
+        # Step 2: Login
+
+        mock_conn.execute.side_effect = None
+
+        mock_login_result = MagicMock()
+        mock_login_row = MagicMock()
+        mock_login_row.id = 1
+        mock_login_row.email = "flowtest@example.com"
+        mock_login_row.login = "flowtest"
+        mock_login_row.hpassword = generate_password_hash("flowpassword123")
+        mock_login_result.first.return_value = mock_login_row
+
+        mock_conn.execute.return_value = mock_login_result
+
+        login_response = client.post("/api/login", json={
+            "email": user_data["email"],
+            "password": user_data["password"]
+        })
+        assert login_response.status_code == 200, f"Expected 200, got {login_response.status_code}, response: {login_response.get_json()}"
+
+        login_data = login_response.get_json()
+        assert "token" in login_data
+        assert "token_type" in login_data
+        assert login_data["token_type"] == "bearer"
+        token = login_data["token"]
+
+        # Step 3: Access protected endpoint
+        mock_conn.execute.side_effect = None
+
+        mock_docs_result = MagicMock()
+        mock_docs_result.all.return_value = []
+        mock_conn.execute.return_value = mock_docs_result
+
+        headers = {"Authorization": f"Bearer {token}"}
+        protected_response = client.get("/api/list-documents", headers=headers)
+
+        assert protected_response.status_code == 200, f"Expected 200, got {protected_response.status_code}"
+        protected_data = protected_response.get_json()
+        assert "documents" in protected_data
+        assert protected_data["documents"] == []
+
+    def test_create_user_database_exception(self, client: FlaskClient, app: Flask):
+        """Test user creation with database exception."""
+        user_data = {
+            "email": "test@example.com",
+            "login": "testuser",
+            "password": "password123"
+        }
+
+        mock_conn = app.config['mock_db_conn']
+
+        # Mock database exception (not IntegrityError)
+        mock_conn.execute.side_effect = Exception("Database connection failed")
+
+        response = client.post("/api/create-user", json=user_data)
+
+        assert response.status_code == 503
+        data = response.get_json()
+        assert "error" in data
+        assert "Failed to create user" in data["error"]
+
+    def test_login_database_exception(self, client: FlaskClient, app: Flask):
+        """Test login with database exception."""
+        login_data = {
+            "email": "test@example.com",
+            "password": "password123"
+        }
+
+        mock_conn = app.config['mock_db_conn']
+
+        # Mock database exception
+        mock_conn.execute.side_effect = Exception("Database query failed")
+
+        response = client.post("/api/login", json=login_data)
+
+        assert response.status_code == 503
+        data = response.get_json()
+        assert "error" in data
+        assert "Login failed" in data["error"]
+
+    def test_create_user_length_validation(self, client: FlaskClient):
+        """Test create_user with length validation for login, password, and email."""
+        test_cases = [
+            # Login too long (>50 chars)
+            {
+                "email": "test@example.com",
+                "login": "a" * 51,  # 51 characters
+                "password": "password123",
+                "expected_error": "Login exceeds maximum length"
+            },
+            # Password too long (>128 chars)
+            {
+                "email": "test@example.com", 
+                "login": "testuser",
+                "password": "a" * 129,  # 129 characters
+                "expected_error": "Password exceeds maximum length"
+            },
+            # Email too long (>254 chars)
+            {
+                "email": "a" * 250 + "@example.com",  # 263 characters
+                "login": "testuser",
+                "password": "password123",
+                "expected_error": "Email exceeds maximum length"
+            }
+        ]
         
-        with patch('sqlalchemy.create_engine') as mock_create_engine:
-            mock_conn = MagicMock()
-            mock_engine = MagicMock()
-            mock_create_engine.return_value = mock_engine
+        for user_data in test_cases:
+            response = client.post("/api/create-user", json=user_data)
+            assert response.status_code == 400
+            data = response.get_json()
+            assert "error" in data
+            assert user_data["expected_error"] in data["error"]
+
+    def test_create_user_login_character_validation(self, client: FlaskClient):
+        """Test create_user with login character validation."""
+        test_cases = [
+            # Login with invalid characters
+            {
+                "email": "test@example.com",
+                "login": "user@name",  # Contains @
+                "password": "password123",
+                "expected_error": "login can only contain letters, numbers, underscores, and hyphens"
+            },
+            {
+                "email": "test@example.com", 
+                "login": "user name",  # Contains space
+                "password": "password123",
+                "expected_error": "login can only contain letters, numbers, underscores, and hyphens"
+            },
+            {
+                "email": "test@example.com",
+                "login": "user.name",  # Contains dot
+                "password": "password123", 
+                "expected_error": "login can only contain letters, numbers, underscores, and hyphens"
+            }
+        ]
+        
+        for user_data in test_cases:
+            response = client.post("/api/create-user", json=user_data)
+            assert response.status_code == 400
+            data = response.get_json()
+            assert "error" in data
+            assert user_data["expected_error"] in data["error"]
+
+    def test_create_user_valid_login_characters(self, client: FlaskClient, app: Flask):
+        """Test create_user with valid login characters."""
+        valid_logins = [
+            "user123",  # letters and numbers
+            "user_name",  # underscore
+            "user-name",  # hyphen
+            "User123_Name-Test",  # mixed valid characters
+            "a",  # single character
+            "123",  # numbers only
+        ]
+        
+        mock_conn = app.config['mock_db_conn']
+        
+        for login in valid_logins:
+            user_data = {
+                "email": f"test{login}@example.com",
+                "login": login,
+                "password": "password123"
+            }
             
-            # Step 1: Create user
-            mock_engine.begin.return_value.__enter__.return_value = mock_conn
-            mock_result = MagicMock()
-            mock_result.lastrowid = 1
+            # Mock successful user creation
+            mock_insert_result = MagicMock()
+            mock_insert_result.lastrowid = 1
+            
+            mock_select_result = MagicMock()
+            mock_user_row = MagicMock()
+            mock_user_row.id = 1
+            mock_user_row.email = user_data["email"]
+            mock_user_row.login = login
+            mock_select_result.one.return_value = mock_user_row
+            
             mock_conn.execute.side_effect = [
-                mock_result,  # INSERT result
-                MagicMock(id=1, email="flowtest@example.com", login="flowtest")  # SELECT result
+                mock_insert_result,
+                mock_select_result
             ]
             
-            create_response = client.post("/api/create-user", json=user_data)
-            assert create_response.status_code == 201
+            response = client.post("/api/create-user", json=user_data)
+            assert response.status_code == 201, f"Login '{login}' should be valid"
             
-            # Step 2: Login
-            mock_engine.connect.return_value.__enter__.return_value = mock_conn
-            from werkzeug.security import generate_password_hash
-            mock_row = MagicMock()
-            mock_row.id = 1
-            mock_row.email = "flowtest@example.com"
-            mock_row.login = "flowtest"
-            mock_row.hpassword = generate_password_hash("flowpassword123")
-            mock_conn.execute.return_value.first.return_value = mock_row
+            # Reset mock for next iteration
+            mock_conn.execute.side_effect = None
+
+    def test_create_user_password_control_characters(self, client: FlaskClient):
+        """Test create_user with password control character validation."""
+        test_cases = [
+            # Password with newline
+            {
+                "email": "test@example.com",
+                "login": "testuser",
+                "password": "pass\nword",
+                "expected_error": "password cannot contain control characters"
+            },
+            # Password with carriage return
+            {
+                "email": "test@example.com",
+                "login": "testuser", 
+                "password": "pass\rword",
+                "expected_error": "password cannot contain control characters"
+            }
+        ]
+        
+        for user_data in test_cases:
+            response = client.post("/api/create-user", json=user_data)
+            assert response.status_code == 400
+            data = response.get_json()
+            assert "error" in data
+            assert user_data["expected_error"] in data["error"]
+
+    def test_create_user_password_tab_allowed(self, client: FlaskClient, app: Flask):
+        """Test create_user with tab character in password (should be allowed)."""
+        user_data = {
+            "email": "test@example.com",
+            "login": "testuser",
+            "password": "pass\tword"  # Tab should be allowed
+        }
+        
+        mock_conn = app.config['mock_db_conn']
+        
+        # Mock successful user creation
+        mock_insert_result = MagicMock()
+        mock_insert_result.lastrowid = 1
+        
+        mock_select_result = MagicMock()
+        mock_user_row = MagicMock()
+        mock_user_row.id = 1
+        mock_user_row.email = "test@example.com"
+        mock_user_row.login = "testuser"
+        mock_select_result.one.return_value = mock_user_row
+        
+        mock_conn.execute.side_effect = [
+            mock_insert_result,
+            mock_select_result
+        ]
+        
+        response = client.post("/api/create-user", json=user_data)
+        assert response.status_code == 201, "Tab character in password should be allowed"
+
+    def test_create_user_email_format_validation(self, client: FlaskClient):
+        """Test create_user with email format validation."""
+        test_cases = [
+            # Invalid email formats
+            {
+                "email": "invalid-email",
+                "login": "testuser",
+                "password": "password123",
+                "expected_error": "invalid email format"
+            },
+            {
+                "email": "@example.com",
+                "login": "testuser", 
+                "password": "password123",
+                "expected_error": "invalid email format"
+            },
+            {
+                "email": "test@",
+                "login": "testuser",
+                "password": "password123",
+                "expected_error": "invalid email format"
+            },
+            {
+                "email": "test@example",
+                "login": "testuser",
+                "password": "password123", 
+                "expected_error": "invalid email format"
+            },
+            {
+                "email": "test.example.com",
+                "login": "testuser",
+                "password": "password123",
+                "expected_error": "invalid email format"
+            }
+        ]
+        
+        for user_data in test_cases:
+            response = client.post("/api/create-user", json=user_data)
+            assert response.status_code == 400
+            data = response.get_json()
+            assert "error" in data
+            assert user_data["expected_error"] in data["error"]
+
+    def test_create_user_valid_email_formats(self, client: FlaskClient, app: Flask):
+        """Test create_user with valid email formats."""
+        valid_emails = [
+            "test@example.com",
+            "user.name@example.com",
+            "user+tag@example.com",
+            "user123@example.com",
+            "test@sub.example.com",
+            "a@b.co"
+        ]
+        
+        mock_conn = app.config['mock_db_conn']
+        
+        for email in valid_emails:
+            user_data = {
+                "email": email,
+                "login": f"user{len(email)}",  # Unique login
+                "password": "password123"
+            }
             
-            login_response = client.post("/api/login", json={
-                "email": user_data["email"],
-                "password": user_data["password"]
-            })
-            assert login_response.status_code == 200
+            # Mock successful user creation
+            mock_insert_result = MagicMock()
+            mock_insert_result.lastrowid = 1
             
-            token = login_response.get_json()["token"]
+            mock_select_result = MagicMock()
+            mock_user_row = MagicMock()
+            mock_user_row.id = 1
+            mock_user_row.email = email
+            mock_user_row.login = user_data["login"]
+            mock_select_result.one.return_value = mock_user_row
             
-            # Step 3: Access protected endpoint
-            headers = {"Authorization": f"Bearer {token}"}
-            mock_conn.execute.return_value.all.return_value = []
+            mock_conn.execute.side_effect = [
+                mock_insert_result,
+                mock_select_result
+            ]
             
-            protected_response = client.get("/api/list-documents", headers=headers)
-            assert protected_response.status_code == 200
+            response = client.post("/api/create-user", json=user_data)
+            assert response.status_code == 201, f"Email '{email}' should be valid"
+            
+            # Reset mock for next iteration
+            mock_conn.execute.side_effect = None

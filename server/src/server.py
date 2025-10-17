@@ -282,12 +282,38 @@ def create_app():
     # POST /api/create-user {email, login, password}
     @app.post("/api/create-user")
     def create_user():
-        payload = request.get_json(silent=True) or {}
-        email = (payload.get("email") or "").strip().lower()
-        login = (payload.get("login") or "").strip()
-        password = payload.get("password") or ""
-        if not email or not login or not password:
+        data = request.get_json(silent=True)
+        if not data:
             return jsonify({"error": "email, login, and password are required"}), 400
+        login = data.get('login')
+        password = data.get('password')
+        email = data.get('email')
+        if not all([login, password, email]):
+            return jsonify({"error": "email, login, and password are required"}), 400
+        if len(login) > 50:
+            return jsonify({"error": "Login exceeds maximum length of 50 characters"}), 400
+        if len(password) > 128:
+            return jsonify({"error": "Password exceeds maximum length of 128 characters"}), 400
+        if len(email) > 254:
+            return jsonify({"error": "Email exceeds maximum length of 254 characters"}), 400
+
+        email = email.strip().lower()
+        login = login.strip()
+        
+        # 输入验证：检查是否包含非法字符
+        import re
+        
+        # 检查login是否只包含字母、数字、下划线和连字符
+        if not re.match(r'^[a-zA-Z0-9_-]+$', login):
+            return jsonify({"error": "login can only contain letters, numbers, underscores, and hyphens"}), 400
+        
+        # 检查password是否包含换行符或其他控制字符
+        if any(ord(c) < 32 and c not in '\t' for c in password):
+            return jsonify({"error": "password cannot contain control characters"}), 400
+        
+        # 检查email格式
+        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
+            return jsonify({"error": "invalid email format"}), 400
 
         hpw = generate_password_hash(password)
 
@@ -697,6 +723,7 @@ def create_app():
         except (TypeError, ValueError):
             return jsonify({"error": "document id required"}), 400
 
+
         # Fetch the document (enforce ownership)
         try:
             with get_engine().connect() as conn:
@@ -784,169 +811,221 @@ def create_app():
         )
 
     # POST /api/create-watermark or /api/create-watermark/<id>  → create watermarked pdf and returns metadata
-    @app.post("/api/create-watermark")
-    @app.post("/api/create-watermark/<int:document_id>")
-    @require_auth
-    def create_watermark(document_id: int | None = None):
-        # accept id from path, query (?id= / ?documentid=), or JSON body on GET
-        if not document_id:
-            document_id = (
-                request.args.get("id")
-                or request.args.get("documentid")
-                or (request.is_json and (request.get_json(silent=True) or {}).get("id"))
-            )
-        try:
-            doc_id = document_id
-        except (TypeError, ValueError):
+    def validate_document_id(document_id):
+        """Validate document_id and return error response if invalid"""
+        if document_id is None:
             return jsonify({"error": "document id required"}), 400
-
-        payload = request.get_json(silent=True) or {}
-        # allow a couple of aliases for convenience
-        method = payload.get("method")
-        intended_for = payload.get("intended_for")
-        position = payload.get("position") or None
-        secret = payload.get("secret")
-        key = payload.get("key")
-
-        # validate input
+        
         try:
-            doc_id = int(doc_id)
+            doc_id = int(document_id)
         except (TypeError, ValueError):
             return jsonify({"error": "document_id (int) is required"}), 400
-        if not method or not intended_for or not isinstance(secret, str) or not isinstance(key, str):
-            app.logger.warning("event=create_watermark_failed reason=missing_fields doc_id=%s user_id=%s", doc_id, g.user["id"])
+        
+        # 验证id必须是正整数
+        if doc_id <= 0:
+            return jsonify({"error": "document_id must be a positive integer"}), 400
+        
+        return None, None  # No error
+
+    @app.post("/api/create-watermark")
+    @app.post("/api/create-watermark/<document_id>")
+    def create_watermark(document_id: str | None = None):
+        try:
+            # accept id from path, query (?id= / ?documentid=), or JSON body on GET
+            if document_id is None:
+                json_data = request.get_json(silent=True) or {}
+                document_id = (
+                        request.args.get("id")
+                        or request.args.get("documentid")
+                        or json_data.get("id")
+                )
+            
+            # Validate document_id first - convert to int if it's a string
+            if document_id is not None:
+                try:
+                    document_id = int(document_id)
+                except (ValueError, TypeError):
+                    return jsonify({"error": "document_id (int) is required"}), 400
+            
+            error_response, status_code = validate_document_id(document_id)
+            if error_response is not None:
+                return error_response, status_code
+            
+            # Now check authentication
+            auth = request.headers.get("Authorization", "")
+            if not auth.startswith("Bearer "):
+                app.logger.info("event=auth_failed reason=missing_bearer method=%s path=%s ip=%s", request.method,
+                                request.path, getattr(g, 'client_ip', 'unknown'))
+                return _auth_error("Missing or invalid Authorization header")
+            
+            token = auth.split(" ", 1)[1].strip()
+            try:
+                data = _serializer().loads(token, max_age=app.config["TOKEN_TTL_SECONDS"])
+            except SignatureExpired:
+                app.logger.info("event=auth_failed reason=token_expired method=%s path=%s ip=%s", request.method,
+                                request.path, getattr(g, 'client_ip', 'unknown'))
+                return _auth_error("Token expired")
+            except BadSignature:
+                app.logger.info("event=auth_failed reason=invalid_token method=%s path=%s ip=%s", request.method,
+                                request.path, getattr(g, 'client_ip', 'unknown'))
+                return _auth_error("Invalid token")
+            
+            g.user = {
+                "id": int(data["uid"]),
+                "login": data["login"],
+                "email": data.get("email"),
+            }
+            
+            # Get the validated doc_id
+            doc_id = int(document_id)
+
+            payload = request.get_json(silent=True) or {}
+            # allow a couple of aliases for convenience
+            method = payload.get("method")
+            intended_for = payload.get("intended_for")
+            position = payload.get("position") or None
+            secret = payload.get("secret")
+            key = payload.get("key")
+            if not method or not intended_for or not isinstance(secret, str) or not isinstance(key, str):
+                app.logger.warning("event=create_watermark_failed reason=missing_fields doc_id=%s user_id=%s", doc_id,
+                                   g.user["id"])
+                return (
+                    jsonify({"error": "method, intended_for, secret, and key are required"}),
+                    400,
+                )
+
+            # lookup the document; enforce ownership
+            try:
+                with get_engine().connect() as conn:
+                    row = conn.execute(
+                        text(
+                            """
+                            SELECT id, name, path
+                            FROM Documents
+                            WHERE id = :id AND ownerid = :uid
+                            LIMIT 1
+                        """),
+                        {"id": doc_id, "uid": int(g.user["id"])},
+                    ).first()
+            except Exception as e:
+                app.logger.error("event=create_watermark_failed reason=database_error doc_id=%s user_id=%s error=%s",
+                                 doc_id, g.user["id"], str(e))
+                return _safe_error("Failed to create watermark", e, 503)
+
+            if not row:
+                app.logger.warning("event=create_watermark_failed reason=document_not_found doc_id=%s user_id=%s", doc_id,
+                                   g.user["id"])
+                return jsonify({"error": "document not found"}), 404
+
+            # resolve path safely under STORAGE_DIR
+            storage_root = Path(cast(str, app.config["STORAGE_DIR"])).resolve()
+            try:
+                file_path = _safe_resolve_under_storage(row.path, storage_root)
+                app.logger.info("event=create_watermark_attempt doc_id=%s method=%s intended_for=%s user_id=%s path=%s",
+                                doc_id, method, intended_for, g.user["id"], file_path)
+            except RuntimeError:
+                return jsonify({"error": "document path invalid"}), 500
+            if not file_path.exists():
+                return jsonify({"error": "file missing on disk"}), 410
+
+            # check watermark applicability
+            try:
+                applicable = WMUtils.is_watermarking_applicable(method=method, pdf=str(file_path), position=position)
+                if applicable is False:
+                    app.logger.warning("event=create_watermark_failed reason=method_not_applicable doc_id=%s user_id=%s",
+                                       doc_id, g.user["id"])
+                    return jsonify({"error": "watermarking method not applicable"}), 400
+            except Exception as e:
+                app.logger.error("event=create_watermark_failed reason=exception doc_id=%s user_id=%s error=%s",
+                                 doc_id, g.user["id"], str(e))
+                return _safe_error("Watermark method not supported for this document", e, 400)
+
+            # apply watermark → bytes
+            try:
+                wm_bytes: bytes = WMUtils.apply_watermark(
+                    pdf=str(file_path),
+                    secret=secret,
+                    key=key,
+                    method=method,
+                    position=position,
+                )
+                if not isinstance(wm_bytes, (bytes, bytearray)) or len(wm_bytes) == 0:
+                    return jsonify({"error": "watermarking produced no output"}), 500
+            except Exception as e:
+                app.logger.error("event=create_watermark_failed reason=exception doc_id=%s user_id=%s error=%s",
+                                 doc_id, g.user["id"], str(e))
+                return _safe_error("Failed to apply watermark", e, 500)
+
+            # build destination file name: "<original_name>__<method_name>__<intended_to>__<timestamp>.pdf"
+            base_name = Path(row.name or file_path.name).stem
+            intended_slug = secure_filename(intended_for)
+            method_name = secure_filename(method)
+            timestamp = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%S%fZ")
+            dest_dir = file_path.parent / "watermarks"
+            dest_dir.mkdir(parents=True, exist_ok=True)
+
+            candidate = f"{base_name}__{method_name}__{intended_slug}__{timestamp}.pdf"
+            dest_path = dest_dir / candidate
+
+            # write bytes
+            try:
+                with dest_path.open("wb") as f:
+                    f.write(wm_bytes)
+            except Exception as e:
+                return _safe_error("Failed to save watermarked document", e, 500)
+
+            timestamp = dt.datetime.utcnow().isoformat()
+            random_part = secrets.token_hex(16)
+            link_token = hashlib.sha256(f"{candidate}_{timestamp}_{random_part}".encode("utf-8")).hexdigest()
+
+            try:
+                with get_engine().begin() as conn:
+                    conn.execute(
+                        text(
+                            """
+                            INSERT INTO Versions (documentid, link, intended_for, secret, method, position, path)
+                            VALUES (:documentid, :link, :intended_for, :secret, :method, :position, :path)
+                        """
+                        ),
+                        {
+                            "documentid": doc_id,
+                            "link": link_token,
+                            "intended_for": intended_for,
+                            "secret": secret,
+                            "method": method,
+                            "position": position or "",
+                            "path": dest_path,
+                        },
+                    )
+                    vid = int(conn.execute(text("SELECT LAST_INSERT_ID()")).scalar())
+                app.logger.info(
+                    "event=create_watermark_success doc_id=%s version_id=%s method=%s intended_for=%s link=%s user_id=%s",
+                    doc_id, vid, method, intended_for, link_token, g.user["id"])
+            except Exception as e:
+                # best-effort cleanup if DB insert fails
+                try:
+                    dest_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                return _safe_error("Failed to create watermark", e, 503)
+
             return (
-                jsonify({"error": "method, intended_for, secret, and key are required"}),
-                400,
-            )
-
-        # lookup the document; enforce ownership
-        try:
-            with get_engine().connect() as conn:
-                row = conn.execute(
-                    text(
-                        """
-                        SELECT id, name, path
-                        FROM Documents
-                        WHERE id = :id AND ownerid = :uid
-                        LIMIT 1
-                    """),
-                    {"id": doc_id, "uid": int(g.user["id"])},
-                ).first()
-        except Exception as e:
-            app.logger.error("event=create_watermark_failed reason=database_error doc_id=%s user_id=%s error=%s", 
-                           doc_id, g.user["id"], str(e))
-            return _safe_error("Failed to create watermark", e, 503)
-
-        if not row:
-            app.logger.warning("event=create_watermark_failed reason=document_not_found doc_id=%s user_id=%s", doc_id, g.user["id"])
-            return jsonify({"error": "document not found"}), 404
-
-        # resolve path safely under STORAGE_DIR
-        storage_root = Path(cast(str, app.config["STORAGE_DIR"])).resolve()
-        try:
-            file_path = _safe_resolve_under_storage(row.path, storage_root)
-            app.logger.info("event=create_watermark_attempt doc_id=%s method=%s intended_for=%s user_id=%s path=%s", 
-                           doc_id, method, intended_for, g.user["id"], file_path)
-        except RuntimeError:
-            return jsonify({"error": "document path invalid"}), 500
-        if not file_path.exists():
-            return jsonify({"error": "file missing on disk"}), 410
-
-        # check watermark applicability
-        try:
-            applicable = WMUtils.is_watermarking_applicable(method=method, pdf=str(file_path), position=position)
-            if applicable is False:
-                app.logger.warning("event=create_watermark_failed reason=method_not_applicable doc_id=%s user_id=%s", doc_id, g.user["id"])
-                return jsonify({"error": "watermarking method not applicable"}), 400
-        except Exception as e:
-            app.logger.error("event=create_watermark_failed reason=exception doc_id=%s user_id=%s error=%s", 
-                           doc_id, g.user["id"], str(e))
-            return _safe_error("Watermark method not supported for this document", e, 400)
-
-        # apply watermark → bytes
-        try:
-            wm_bytes: bytes = WMUtils.apply_watermark(
-                pdf=str(file_path),
-                secret=secret,
-                key=key,
-                method=method,
-                position=position,
-            )
-            if not isinstance(wm_bytes, (bytes, bytearray)) or len(wm_bytes) == 0:
-                return jsonify({"error": "watermarking produced no output"}), 500
-        except Exception as e:
-            app.logger.error("event=create_watermark_failed reason=exception doc_id=%s user_id=%s error=%s", 
-                           doc_id, g.user["id"], str(e))
-            return _safe_error("Failed to apply watermark", e, 500)
-
-        # build destination file name: "<original_name>__<method_name>__<intended_to>__<timestamp>.pdf"
-        base_name = Path(row.name or file_path.name).stem
-        intended_slug = secure_filename(intended_for)
-        method_name = secure_filename(method)
-        timestamp = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%S%fZ")
-        dest_dir = file_path.parent / "watermarks"
-        dest_dir.mkdir(parents=True, exist_ok=True)
-
-        candidate = f"{base_name}__{method_name}__{intended_slug}__{timestamp}.pdf"
-        dest_path = dest_dir / candidate
-
-        # write bytes
-        try:
-            with dest_path.open("wb") as f:
-                f.write(wm_bytes)
-        except Exception as e:
-            return _safe_error("Failed to save watermarked document", e, 500)
-
-        timestamp = dt.datetime.utcnow().isoformat()
-        random_part = secrets.token_hex(16)
-        link_token = hashlib.sha256(f"{candidate}_{timestamp}_{random_part}".encode("utf-8")).hexdigest()
-
-        try:
-            with get_engine().begin() as conn:
-                conn.execute(
-                    text(
-                        """
-                        INSERT INTO Versions (documentid, link, intended_for, secret, method, position, path)
-                        VALUES (:documentid, :link, :intended_for, :secret, :method, :position, :path)
-                    """
-                    ),
+                jsonify(
                     {
+                        "id": vid,
                         "documentid": doc_id,
                         "link": link_token,
                         "intended_for": intended_for,
-                        "secret": secret,
                         "method": method,
-                        "position": position or "",
-                        "path": dest_path,
-                    },
-                )
-                vid = int(conn.execute(text("SELECT LAST_INSERT_ID()")).scalar())
-            app.logger.info("event=create_watermark_success doc_id=%s version_id=%s method=%s intended_for=%s link=%s user_id=%s", 
-                           doc_id, vid, method, intended_for, link_token, g.user["id"])
-        except Exception as e:
-            # best-effort cleanup if DB insert fails
-            try:
-                dest_path.unlink(missing_ok=True)
-            except Exception:
-                pass
-            return _safe_error("Failed to create watermark", e, 503)
-
-        return (
-            jsonify(
-                {
-                    "id": vid,
-                    "documentid": doc_id,
-                    "link": link_token,
-                    "intended_for": intended_for,
-                    "method": method,
-                    "position": position,
-                    "filename": candidate,
-                    "size": len(wm_bytes),
-                }
-            ),
-            201,
-        )
+                        "position": position,
+                        "filename": candidate,
+                        "size": len(wm_bytes),
+                    }
+                ),
+                201,
+            )
+        except (ValueError, TypeError, KeyError) as e:
+            return jsonify({"error": "document_id (int) is required"}), 400
 
     # @app.post("/api/load-plugin")
     # @require_auth
@@ -1023,6 +1102,7 @@ def create_app():
 
     # GET /api/get-watermarking-methods -> {"methods":[{"name":..., "description":...}, ...], "count":N}
     @app.get("/api/get-watermarking-methods")
+    @require_auth
     def get_watermarking_methods():
         methods = []
 
@@ -1169,24 +1249,31 @@ def create_app():
 
     @app.route('/api/rmap-initiate', methods=['POST'])
     def rmap_initiate():
-        if rmap_service is None:
-            app.logger.error("event=rmap_initiate_failed reason=service_unavailable")
-            return jsonify({"error": "RMAP service not available"}), 503
+        try:
+            if rmap_service is None:
+                app.logger.error("event=rmap_initiate_failed reason=service_unavailable")
+                return jsonify({"error": "RMAP service not available"}), 503
 
-        data = request.get_json()
-        if not data or 'payload' not in data:
-            return jsonify({"error": "Payload missing"}), 400
-        
-        # Log the request to establish a session
-        decrypted_data = identity_manager.decrypt_for_server(data['payload'])
-        app.logger.info("event=rmap_initiate_success identity=%s", decrypted_data['identity'])
-        
-        response = rmap_service.handle_message1(data)
-        if "error" in response:
-            app.logger.error("event=rmap_initiate_failed reason=error in response error=%s", response['error'])
-            return jsonify({"error": response['error']}), 400
-        else:
-            return response, 200
+            data = request.get_json()
+            if not data or 'payload' not in data:
+                return jsonify({"error": "Payload missing"}), 400
+            
+            payload = data['payload']
+            if not payload or not isinstance(payload, str):
+                return jsonify({"error": "Payload must be a non-empty string"}), 400
+
+            # Log the request to establish a session
+            decrypted_data = identity_manager.decrypt_for_server(payload)
+            app.logger.info("event=rmap_initiate_success identity=%s", decrypted_data['identity'])
+
+            response = rmap_service.handle_message1(data)
+            if "error" in response:
+                app.logger.error("event=rmap_initiate_failed reason=error in response error=%s", response['error'])
+                return jsonify({"error": response['error']}), 400
+            else:
+                return response, 200
+        except (ValueError, TypeError, KeyError, AttributeError) as e:
+            return jsonify({"error": "Invalid or malformed RMAP payload."}), 400
 
     @app.route('/api/rmap-get-link', methods=['POST'])
     def rmap_get_link():
