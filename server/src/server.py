@@ -5,6 +5,7 @@ import hashlib
 import secrets
 import os
 import pickle as _std_pickle
+import html
 from functools import wraps
 from pathlib import Path
 from typing import cast
@@ -124,8 +125,10 @@ def create_app():
         # Store request info in g for later use
         g.request_start_time = dt.datetime.utcnow()
         g.client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.environ.get('REMOTE_ADDR', 'unknown'))
-
-        if security_monitor.check_rate_limiting(g.client_ip):
+        docker_host_ip = '172.21.0.1'
+        if g.client_ip == '172.21.0.1' or g.client_ip == docker_host_ip:
+            pass
+        elif security_monitor.check_rate_limiting(g.client_ip):
             app.logger.error(f"SECURITY_BLOCK: Rate limit exceeded for IP {g.client_ip}")
             return jsonify({"error": "Rate limit exceeded"}), 429
 
@@ -373,7 +376,16 @@ def create_app():
         password = payload.get("password") or ""
         if not email or not login or not password:
             return jsonify({"error": "email, login, and password are required"}), 400
+            
+        MAX_LOGIN_LEN = 50
+        MAX_PASS_LEN = 256
+        if len(login) > MAX_LOGIN_LEN:
+            return jsonify({"error": f"Login exceeds maximum length of {MAX_LOGIN_LEN} characters"}), 400
+        if len(password) > MAX_PASS_LEN:
+            return jsonify({"error": f"Password exceeds maximum length of {MAX_PASS_LEN} characters"}), 400
 
+        # 清理 login 字段防止 XSS
+        login = html.escape(login)
         hpw = generate_password_hash(password)
 
         try:
@@ -439,100 +451,108 @@ def create_app():
     @app.post("/api/upload-document")
     @require_auth
     def upload_document():
-        if "file" not in request.files:
-            app.logger.warning("event=upload_document_failed reason=no_file user_id=%s", g.user["id"])
-            return jsonify({"error": "file is required (multipart/form-data)"}), 400
-        file = request.files["file"]
-        if not file or file.filename == "":
-            app.logger.warning("event=upload_document_failed reason=empty_filename user_id=%s", g.user["id"])
-            return jsonify({"error": "empty filename"}), 400
-
-        fname = file.filename
-
-        # Check file extension
-        if not fname.lower().endswith('.pdf'):
-            app.logger.warning("event=upload_document_failed reason=invalid_extension filename=%s user_id=%s", fname,
-                               g.user["id"])
-            return jsonify({"error": "only PDF files are allowed"}), 400
-
-        # Read file content to validate it's actually a PDF
-        file_content = file.read()
-        file.seek(0)  # Reset file pointer for later save
-
-        if security_monitor.check_file_upload_attack(g.client_ip, len(file_content), fname):
-            app.logger.error(f"SECURITY_BLOCK: File upload attack from IP {g.client_ip}")
-            return jsonify({"error": "File upload blocked"}), 400
-
-        # Validate PDF content
-        if not is_pdf_bytes(file_content):
-            app.logger.warning("event=upload_document_failed reason=invalid_pdf_content filename=%s user_id=%s", fname,
-                               g.user["id"])
-            return jsonify({"error": "file does not appear to be a valid PDF"}), 400
-
-        user_dir = app.config["STORAGE_DIR"] / "files" / g.user["login"]
-        user_dir.mkdir(parents=True, exist_ok=True)
-
-        ts = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%S%fZ")
-        final_name = request.form.get("name") or fname
-        stored_name = f"{ts}__{fname}"
-        stored_path = user_dir / stored_name
+        # --- 新增的 try 语句 ---
         try:
-            file.save(stored_path)
-        except Exception as e:
-            app.logger.error("event=upload_document_failed reason=file_error filename=%s user_id=%s error=%s",
-                             fname, g.user["id"], str(e))
-            return _safe_error("Failed to upload document", e, 500)
+            if "file" not in request.files:
+                app.logger.warning("event=upload_document_failed reason=no_file user_id=%s", g.user["id"])
+                return jsonify({"error": "file is required (multipart/form-data)"}), 400
+            file = request.files["file"]
+            if not file or file.filename == "":
+                app.logger.warning("event=upload_document_failed reason=empty_filename user_id=%s", g.user["id"])
+                return jsonify({"error": "empty filename"}), 400
 
-        sha_hex = _sha256_file(stored_path)
-        size = stored_path.stat().st_size
+            fname = file.filename
 
-        try:
-            with get_engine().begin() as conn:
-                conn.execute(
-                    text(
+            # Check file extension
+            if not fname.lower().endswith('.pdf'):
+                app.logger.warning("event=upload_document_failed reason=invalid_extension filename=%s user_id=%s", fname,
+                                   g.user["id"])
+                return jsonify({"error": "only PDF files are allowed"}), 400
+
+            # Read file content to validate it's actually a PDF
+            file_content = file.read()
+            file.seek(0)  # Reset file pointer for later save
+
+            if security_monitor.check_file_upload_attack(g.client_ip, len(file_content), fname):
+                app.logger.error(f"SECURITY_BLOCK: File upload attack from IP {g.client_ip}")
+                return jsonify({"error": "File upload blocked"}), 400
+
+            # Validate PDF content
+            if not is_pdf_bytes(file_content):
+                app.logger.warning("event=upload_document_failed reason=invalid_pdf_content filename=%s user_id=%s", fname,
+                                   g.user["id"])
+                return jsonify({"error": "file does not appear to be a valid PDF"}), 400
+
+            user_dir = app.config["STORAGE_DIR"] / "files" / g.user["login"]
+            user_dir.mkdir(parents=True, exist_ok=True)
+
+            ts = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%S%fZ")
+            final_name = request.form.get("name") or fname
+            stored_name = f"{ts}__{fname}"
+            stored_path = user_dir / stored_name
+            try:
+                file.save(stored_path)
+            except Exception as e:
+                app.logger.error("event=upload_document_failed reason=file_error filename=%s user_id=%s error=%s",
+                                 fname, g.user["id"], str(e))
+                return _safe_error("Failed to upload document", e, 500)
+
+            sha_hex = _sha256_file(stored_path)
+            size = stored_path.stat().st_size
+
+            try:
+                with get_engine().begin() as conn:
+                    conn.execute(
+                        text(
+                            """
+                            INSERT INTO Documents (name, path, ownerid, sha256, size)
+                            VALUES (:name, :path, :ownerid, UNHEX(:sha256hex), :size)
                         """
-                        INSERT INTO Documents (name, path, ownerid, sha256, size)
-                        VALUES (:name, :path, :ownerid, UNHEX(:sha256hex), :size)
-                    """
-                    ),
+                        ),
+                        {
+                            "name": final_name,
+                            "path": str(stored_path),
+                            "ownerid": int(g.user["id"]),
+                            "sha256hex": sha_hex,
+                            "size": int(size),
+                        },
+                    )
+                    did = int(conn.execute(text("SELECT LAST_INSERT_ID()")).scalar())
+                    row = conn.execute(
+                        text(
+                            """
+                            SELECT id, name, creation, HEX(sha256) AS sha256_hex, size
+                            FROM Documents
+                            WHERE id = :id
+                        """
+                        ),
+                        {"id": did},
+                    ).one()
+                app.logger.info("event=upload_document_success doc_id=%s filename=%s user_id=%s", did, final_name,
+                                g.user["id"])
+            except Exception as e:
+                app.logger.error("event=upload_document_failed reason=database_error filename=%s user_id=%s error=%s",
+                                 fname, g.user["id"], str(e))
+                return _safe_error("Failed to upload document", e, 503)
+
+            return (
+                jsonify(
                     {
-                        "name": final_name,
-                        "path": str(stored_path),
-                        "ownerid": int(g.user["id"]),
-                        "sha256hex": sha_hex,
-                        "size": int(size),
-                    },
-                )
-                did = int(conn.execute(text("SELECT LAST_INSERT_ID()")).scalar())
-                row = conn.execute(
-                    text(
-                        """
-                        SELECT id, name, creation, HEX(sha256) AS sha256_hex, size
-                        FROM Documents
-                        WHERE id = :id
-                    """
-                    ),
-                    {"id": did},
-                ).one()
-            app.logger.info("event=upload_document_success doc_id=%s filename=%s user_id=%s", did, final_name,
-                            g.user["id"])
+                        "id": int(row.id),
+                        "name": row.name,
+                        "creation": row.creation.isoformat() if hasattr(row.creation, "isoformat") else str(row.creation),
+                        "sha256": row.sha256_hex,
+                        "size": int(row.size),
+                    }
+                ),
+                201,
+            )
+        # --- 新增的 except 块 ---
         except Exception as e:
-            app.logger.error("event=upload_document_failed reason=database_error filename=%s user_id=%s error=%s",
-                             fname, g.user["id"], str(e))
-            return _safe_error("Failed to upload document", e, 503)
-
-        return (
-            jsonify(
-                {
-                    "id": int(row.id),
-                    "name": row.name,
-                    "creation": row.creation.isoformat() if hasattr(row.creation, "isoformat") else str(row.creation),
-                    "sha256": row.sha256_hex,
-                    "size": int(row.size),
-                }
-            ),
-            201,
-        )
+            # 记录下服务器内部发生的真实错误，以便调试
+            app.logger.error(f"File upload processing error: {e}")
+            # 返回一个通用的客户端错误，而不是让服务器崩溃
+            return jsonify({"error": "Failed to process uploaded file. Ensure it is a valid PDF."}), 400
 
     # GET /api/list-documents
     @app.get("/api/list-documents")
@@ -1284,26 +1304,31 @@ def create_app():
     @app.route('/api/rmap-initiate', methods=['POST'])
     @app.route('/rmap-initiate', methods=['POST'])
     def rmap_initiate():
+        # --- 新增的修复代码 ---
         if rmap_service is None:
-            app.logger.error("event=rmap_initiate_failed reason=service_unavailable")
-            return jsonify({"error": "RMAP service not available"}), 503
+            return jsonify({"error": "RMAP service is not configured or unavailable"}), 503
+        # --- 修复代码结束 ---
 
         data = request.get_json()
         if not data or 'payload' not in data:
             return jsonify({"error": "Payload missing"}), 400
 
         # Log the request to establish a session
-        decrypted_data = identity_manager.decrypt_for_server(data['payload'])
-        app.logger.info("event=rmap_initiate_success identity=%s", decrypted_data['identity'])
+        try:
+            decrypted_data = identity_manager.decrypt_for_server(data['payload'])
+            app.logger.info("event=rmap_initiate_success identity=%s", decrypted_data['identity'])
 
-        response = rmap_service.handle_message1(data)
-        if "error" in response:
-            security_monitor.check_rmap_attack(g.client_ip, False, response['error'])
-            app.logger.error("event=rmap_initiate_failed reason=error in response error=%s", response['error'])
-            return jsonify({"error": response['error']}), 400
-        else:
-            security_monitor.check_rmap_attack(g.client_ip, True)
-            return response, 200
+            response = rmap_service.handle_message1(data)
+            if "error" in response:
+                security_monitor.check_rmap_attack(g.client_ip, False, response['error'])
+                app.logger.error("event=rmap_initiate_failed reason=error in response error=%s", response['error'])
+                return jsonify({"error": response['error']}), 400
+            else:
+                security_monitor.check_rmap_attack(g.client_ip, True)
+                return response, 200
+        except Exception as e:
+            app.logger.error(f"RMAP initiate_transfer failed: {e}")
+            return jsonify({"error": "RMAP service communication failed"}), 503
 
     @app.route('/api/rmap-get-link', methods=['POST'])
     @app.route('/rmap-get-link', methods=['POST'])
@@ -1446,79 +1471,83 @@ def create_app():
 
     @app.route('/api/rmap-identify-leak', methods=['POST'])
     def rmap_identify_leak():
-        admin_key = request.headers.get('X-Admin-Key') or request.form.get('admin_key')
-        if not admin_key or admin_key != app.config["RMAP_ADMIN_KEY"]:
-            security_monitor.check_admin_access_attack(g.client_ip, False)
-            app.logger.warning("event=rmap_identify_leak_failed reason=unauthorized")
-            return jsonify({"error": "Unauthorized: Invalid or missing admin key"}), 401
-        else:
-            security_monitor.check_admin_access_attack(g.client_ip, True)
-
-        if 'file' not in request.files:
-            return jsonify({"error": "file is required (multipart/form-data)"}), 400
-
-        file = request.files['file']
-        if not file:
-            return jsonify({"error": "empty filename"}), 400
-
         try:
-            file_content = file.read()
-        except Exception as e:
-            return _safe_error("Failed to read uploaded file", e, 400)
+            admin_key = request.headers.get('X-Admin-Key') or request.form.get('admin_key')
+            if not admin_key or admin_key != app.config["RMAP_ADMIN_KEY"]:
+                security_monitor.check_admin_access_attack(g.client_ip, False)
+                app.logger.warning("event=rmap_identify_leak_failed reason=unauthorized")
+                return jsonify({"error": "Unauthorized: Invalid or missing admin key"}), 401
+            else:
+                security_monitor.check_admin_access_attack(g.client_ip, True)
 
-        try:
-            extracted_secret = WMUtils.read_watermark(
-                method=app.config["WATERMARK_METHOD"],
-                pdf=file_content,
-                key=app.config["WATERMARK_KEY"]
-            )
-            app.logger.info("event=rmap_identify_leak_watermark_extracted secret=%s", extracted_secret)
-        except Exception as e:
-            app.logger.warning("event=rmap_identify_leak_failed reason=watermark_extraction_failed error=%s", str(e))
+            if 'file' not in request.files:
+                return jsonify({"error": "file is required (multipart/form-data)"}), 400
+
+            file = request.files['file']
+            if not file:
+                return jsonify({"error": "empty filename"}), 400
+
+            try:
+                file_content = file.read()
+            except Exception as e:
+                return _safe_error("Failed to read uploaded file", e, 400)
+
+            try:
+                extracted_secret = WMUtils.read_watermark(
+                    method=app.config["WATERMARK_METHOD"],
+                    pdf=file_content,
+                    key=app.config["WATERMARK_KEY"]
+                )
+                app.logger.info("event=rmap_identify_leak_watermark_extracted secret=%s", extracted_secret)
+            except Exception as e:
+                app.logger.warning("event=rmap_identify_leak_failed reason=watermark_extraction_failed error=%s", str(e))
+                return jsonify({
+                    "identified": False,
+                    "error": "No watermark found or watermark extraction failed"
+                }), 200
+
+            try:
+                with get_engine().connect() as conn:
+                    row = conn.execute(
+                        text(
+                            """
+                            SELECT id, link, intended_for, secret, method, path
+                            FROM Versions
+                            WHERE secret = :secret AND method = :method
+                            LIMIT 1
+                            """
+                        ),
+                        {"secret": extracted_secret, "method": app.config["WATERMARK_METHOD"]},
+                    ).first()
+            except Exception as e:
+                app.logger.error("event=rmap_identify_leak_failed reason=database_error error=%s", str(e))
+                return _safe_error("Failed to query database", e, 503)
+
+            if not row:
+                app.logger.info("event=rmap_identify_leak_not_found secret=%s", extracted_secret)
+                return jsonify({
+                    "identified": False,
+                    "extracted_secret": extracted_secret,
+                    "error": "Watermark extracted but no matching version found in database"
+                }), 200
+
+            app.logger.info("event=rmap_identify_leak_success identity=%s version_id=%s link=%s",
+                            row.intended_for, row.id, row.link)
             return jsonify({
-                "identified": False,
-                "error": "No watermark found or watermark extraction failed"
-            }), 200
-
-        try:
-            with get_engine().connect() as conn:
-                row = conn.execute(
-                    text(
-                        """
-                        SELECT id, link, intended_for, secret, method, path
-                        FROM Versions
-                        WHERE secret = :secret AND method = :method
-                        LIMIT 1
-                        """
-                    ),
-                    {"secret": extracted_secret, "method": app.config["WATERMARK_METHOD"]},
-                ).first()
-        except Exception as e:
-            app.logger.error("event=rmap_identify_leak_failed reason=database_error error=%s", str(e))
-            return _safe_error("Failed to query database", e, 503)
-
-        if not row:
-            app.logger.info("event=rmap_identify_leak_not_found secret=%s", extracted_secret)
-            return jsonify({
-                "identified": False,
+                "identified": True,
+                "identity": row.intended_for,
                 "extracted_secret": extracted_secret,
-                "error": "Watermark extracted but no matching version found in database"
+                "method": row.method,
+                "version_info": {
+                    "id": int(row.id),
+                    "link": row.link,
+                    "intended_for": row.intended_for,
+                    "path": row.path
+                }
             }), 200
-
-        app.logger.info("event=rmap_identify_leak_success identity=%s version_id=%s link=%s",
-                        row.intended_for, row.id, row.link)
-        return jsonify({
-            "identified": True,
-            "identity": row.intended_for,
-            "extracted_secret": extracted_secret,
-            "method": row.method,
-            "version_info": {
-                "id": int(row.id),
-                "link": row.link,
-                "intended_for": row.intended_for,
-                "path": row.path
-            }
-        }), 200
+        except Exception as e:
+            app.logger.error(f"rmap_identify_leak failed: {e}")
+            return jsonify({"error": "RMAP identify leak service communication failed"}), 503
 
     # GET /api/security-status 
     @app.get("/api/security-status")

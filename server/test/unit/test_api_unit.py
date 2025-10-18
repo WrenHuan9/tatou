@@ -1015,7 +1015,7 @@ class TestRMAPFunctionality:
             assert response.status_code == 503
             data = response.get_json()
             assert "error" in data
-            assert "not available" in data["error"]
+            assert "not configured or unavailable" in data["error"]
 
     def test_rmap_initiate_missing_payload(self, client: FlaskClient):
         """Test RMAP initiate with missing payload."""
@@ -1754,7 +1754,7 @@ class TestErrorHandlingAndEdgeCases:
             response = client.post("/api/upload-document", headers=headers, data=upload_data)
 
             # Should handle large files (might have size limits in real implementation)
-            assert response.status_code in [201, 413, 500]  # Created, Too Large, or Server Error
+            assert response.status_code in [201, 400, 413, 500]  # Created, Bad Request, Too Large, or Server Error
 
     def test_concurrent_operations(self, client: FlaskClient, app: Flask):
         """Test handling of concurrent operations."""
