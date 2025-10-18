@@ -1,0 +1,867 @@
+openapi: 3.0.3
+info:
+  title: Tatou API
+  description: API for Tatou watermarking platform
+  version: 1.0.0
+  contact:
+    name: Tatou Team
+servers:
+  - url: http://localhost:5001
+    description: Local development server
+  - url: http://localhost:8080
+    description: Alternative local server
+
+security:
+  - BearerAuth: []
+  - AdminKeyAuth: []
+
+paths:
+  /healthz:
+    get:
+      summary: Health check endpoint
+      description: This endpoint checks the health of the server and confirms it is running.
+      operationId: healthz
+      security: []
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                required:
+                  - message
+
+  /api/create-user:
+    post:
+      summary: Create a new user account
+      description: This endpoint creates a new user account in the system.
+      operationId: createUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                login:
+                  type: string
+                password:
+                  type: string
+                email:
+                  type: string
+                  format: email
+              required:
+                - login
+                - password
+                - email
+      responses:
+        '200':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  login:
+                    type: string
+                  email:
+                    type: string
+                    format: email
+                required:
+                  - id
+                  - login
+                  - email
+        '409':
+          description: User already exists
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "User with this email already exists"
+                required:
+                  - error
+
+  /api/login:
+    post:
+      summary: Authenticate user
+      description: This endpoint authenticates a user with their credentials and returns a session token.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+              required:
+                - email
+                - password
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  token_type:
+                    type: string
+                    enum: ["bearer"]
+                  expires_in:
+                    type: integer
+                required:
+                  - token
+                  - token_type
+                  - expires_in
+
+  /api/upload-document:
+    post:
+      summary: Upload a PDF document
+      description: This endpoint uploads a PDF document to the server and registers its metadata.
+      operationId: uploadDocument
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: PDF file
+                name:
+                  type: string
+              required:
+                - file
+                - name
+      responses:
+        '200':
+          description: Document uploaded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  creation:
+                    type: string
+                    format: date-time
+                  sha256:
+                    type: string
+                  size:
+                    type: integer
+                required:
+                  - id
+                  - name
+                  - creation
+                  - sha256
+                  - size
+
+  /api/list-documents:
+    get:
+      summary: List all documents
+      description: This endpoint lists all uploaded PDF documents along with their metadata.
+      operationId: listDocuments
+      responses:
+        '200':
+          description: List of documents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  documents:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        name:
+                          type: string
+                        creation:
+                          type: string
+                          format: date-time
+                        sha256:
+                          type: string
+                        size:
+                          type: integer
+                      required:
+                        - id
+                        - name
+                        - creation
+                        - sha256
+                        - size
+                required:
+                  - documents
+
+  /api/list-versions:
+    get:
+      summary: List versions with document ID parameter
+      description: This endpoint lists all watermarked versions of a given PDF document along with their metadata.
+      operationId: listVersions
+      parameters:
+        - name: documentid
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: List of versions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        documentid:
+                          type: string
+                        link:
+                          type: string
+                        intended_for:
+                          type: string
+                        secret:
+                          type: string
+                        method:
+                          type: string
+                      required:
+                        - id
+                        - documentid
+                        - link
+                        - intended_for
+                        - secret
+                        - method
+                required:
+                  - versions
+
+  /api/list-versions/{document_id}:
+    get:
+      summary: List versions by document ID path parameter
+      description: This endpoint lists all watermarked versions of a given PDF document along with their metadata.
+      operationId: listVersionsByPath
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: List of versions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        documentid:
+                          type: string
+                        link:
+                          type: string
+                        intended_for:
+                          type: string
+                        secret:
+                          type: string
+                        method:
+                          type: string
+                      required:
+                        - id
+                        - documentid
+                        - link
+                        - intended_for
+                        - secret
+                        - method
+                required:
+                  - versions
+
+  /api/list-all-versions:
+    get:
+      summary: List all versions
+      description: This endpoint lists all versions of all PDF documents for the authenticated user stored in the system.
+      operationId: listAllVersions
+      responses:
+        '200':
+          description: List of all versions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        documentid:
+                          type: string
+                        link:
+                          type: string
+                        intended_for:
+                          type: string
+                        secret:
+                          type: string
+                        method:
+                          type: string
+                      required:
+                        - id
+                        - documentid
+                        - link
+                        - intended_for
+                        - secret
+                        - method
+                required:
+                  - versions
+
+  /api/get-document:
+    get:
+      summary: Get document by ID parameter
+      description: This endpoint retrieves a PDF document by fetching a specific one when an id is provided.
+      operationId: getDocument
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: PDF document
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
+  /api/get-document/{document_id}:
+    get:
+      summary: Get document by path parameter
+      description: This endpoint retrieves a PDF document by fetching a specific one when an id is provided.
+      operationId: getDocumentByPath
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: PDF document
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
+  /api/get-version/{link}:
+    get:
+      summary: Get version by link
+      description: Get a specific version by its link.
+      operationId: getVersion
+      parameters:
+        - name: link
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: PDF document
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
+  /api/get-watermarking-methods:
+    get:
+      summary: Get watermarking methods
+      description: This endpoint lists all available watermarking methods.
+      operationId: getWatermarkingMethods
+      responses:
+        '200':
+          description: List of watermarking methods
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  methods:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        description:
+                          type: string
+                        name:
+                          type: string
+                      required:
+                        - description
+                        - name
+                required:
+                  - count
+                  - methods
+
+  /api/read-watermark-by-link/{link}:
+    post:
+      summary: Read watermark by link
+      description: Read watermark from a specific watermarked version by link. Requires authentication.
+      operationId: readWatermarkByLink
+      parameters:
+        - name: link
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                method:
+                  type: string
+                position:
+                  type: string
+                key:
+                  type: string
+              required:
+                - method
+                - position
+                - key
+      responses:
+        '200':
+          description: Watermark read successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  link:
+                    type: string
+                  secret:
+                    type: string
+                  method:
+                    type: string
+                  position:
+                    type: string
+                required:
+                  - link
+                  - secret
+                  - method
+                  - position
+
+  /api/create-watermark:
+    post:
+      summary: Create watermark
+      description: This endpoint reads information contain in a pdf document's watermark with the provided method.
+      operationId: createWatermark
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                method:
+                  type: string
+                position:
+                  type: string
+                key:
+                  type: string
+                secret:
+                  type: string
+                intended_for:
+                  type: string
+                id:
+                  type: integer
+              required:
+                - method
+                - position
+                - key
+                - secret
+                - intended_for
+                - id
+      responses:
+        '200':
+          description: Watermark created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  documentid:
+                    type: integer
+                  link:
+                    type: string
+                  intended_for:
+                    type: string
+                  method:
+                    type: string
+                  position:
+                    type: string
+                  filename:
+                    type: string
+                  size:
+                    type: integer
+                required:
+                  - id
+                  - documentid
+                  - link
+                  - intended_for
+                  - method
+                  - position
+                  - filename
+                  - size
+
+  /api/create-watermark/{document_id}:
+    post:
+      summary: Create watermark for specific document
+      description: This endpoint reads information contain in a pdf document's watermark with the provided method.
+      operationId: createWatermarkForDocument
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                method:
+                  type: string
+                position:
+                  type: string
+                key:
+                  type: string
+                secret:
+                  type: string
+                intended_for:
+                  type: string
+              required:
+                - method
+                - position
+                - key
+                - secret
+                - intended_for
+      responses:
+        '200':
+          description: Watermark created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  documentid:
+                    type: integer
+                  link:
+                    type: string
+                  intended_for:
+                    type: string
+                  method:
+                    type: string
+                  position:
+                    type: string
+                  filename:
+                    type: string
+                  size:
+                    type: integer
+                required:
+                  - id
+                  - documentid
+                  - link
+                  - intended_for
+                  - method
+                  - position
+                  - filename
+                  - size
+
+  /api/delete-document:
+    delete:
+      summary: Delete document
+      description: Delete a document by ID.
+      operationId: deleteDocument
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                document_id:
+                  type: string
+              required:
+                - document_id
+      responses:
+        '200':
+          description: Document deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                required:
+                  - message
+
+    post:
+      summary: Delete document (POST method)
+      description: Delete a document by ID using POST method.
+      operationId: deleteDocumentPost
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                document_id:
+                  type: string
+              required:
+                - document_id
+      responses:
+        '200':
+          description: Document deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                required:
+                  - message
+
+  /api/delete-document/{document_id}:
+    delete:
+      summary: Delete document by path parameter
+      description: Delete a document by ID using path parameter.
+      operationId: deleteDocumentByPath
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Document deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                required:
+                  - message
+
+  /api/rmap-initiate:
+    post:
+      summary: RMAP initiate
+      description: This endpoint receives GPG encrypted messages conforming to RMAP message 1.
+      operationId: rmapInitiate
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                payload:
+                  type: string
+                  description: ASCII armored base64 encoded GPG message
+              required:
+                - payload
+      responses:
+        '200':
+          description: RMAP initiate response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payload:
+                    type: string
+                    description: ASCII armored base64 encoded GPG response
+                required:
+                  - payload
+
+  /api/rmap-get-link:
+    post:
+      summary: RMAP get link
+      description: This endpoint receives GPG encrypted messages conforming to RMAP message 2.
+      operationId: rmapGetLink
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                payload:
+                  type: string
+                  description: ASCII armored base64 encoded GPG message
+              required:
+                - payload
+      responses:
+        '200':
+          description: RMAP get link response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payload:
+                    type: string
+                    description: ASCII armored base64 encoded GPG response
+                required:
+                  - payload
+
+  /api/rmap-identify-leak:
+    post:
+      summary: RMAP identify leak (Admin only)
+      description: This endpoint extracts watermarks from a submitted PDF file to identify which group/identity the file was originally distributed to.
+      operationId: rmapIdentifyLeak
+      security:
+        - AdminKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: PDF file to analyze
+                admin_key:
+                  type: string
+                  description: Admin key (alternative to header)
+      responses:
+        '200':
+          description: Leak identification result
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      identified:
+                        type: boolean
+                      identity:
+                        type: string
+                      extracted_secret:
+                        type: string
+                      method:
+                        type: string
+                      version_info:
+                        type: object
+                        properties:
+                          id:
+                            type: integer
+                          link:
+                            type: string
+                          intended_for:
+                            type: string
+                          path:
+                            type: string
+                        required:
+                          - id
+                          - link
+                          - intended_for
+                          - path
+                    required:
+                      - identified
+                      - identity
+                      - extracted_secret
+                      - method
+                      - version_info
+                  - type: object
+                    properties:
+                      identified:
+                        type: boolean
+                      error:
+                        type: string
+                    required:
+                      - identified
+                      - error
+                  - type: object
+                    properties:
+                      error:
+                        type: string
+                    required:
+                      - error
+        '401':
+          description: Unauthorized - Invalid admin key
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                required:
+                  - error
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    AdminKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Admin-Key
+      description: Admin authentication key

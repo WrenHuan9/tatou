@@ -1,0 +1,5 @@
+schemathesis>=3.19.0
+requests>=2.31.0
+pytest>=7.4.0
+pytest-html>=3.2.0
+pytest-xdist>=3.3.0
