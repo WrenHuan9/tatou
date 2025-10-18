@@ -1776,3 +1776,228 @@ class TestErrorHandlingAndEdgeCases:
         # All should complete successfully
         for response in responses:
             assert response.status_code in [200, 500, 503]  # Success or expected server errors
+
+
+@pytest.mark.integration
+class TestSecurityEndpoints:
+    """Test security-related endpoints for coverage of lines 1552-1627."""
+
+    def test_security_status_success(self, client: FlaskClient, app: Flask):
+        """Test successful security status retrieval."""
+        with patch.dict(os.environ, {'RMAP_ADMIN_KEY': 'test-admin-key'}):
+            app.config["RMAP_ADMIN_KEY"] = "test-admin-key"
+            
+            # Mock security_monitor and disable rate limiting
+            with patch('server.src.server.security_monitor') as mock_monitor:
+                mock_monitor.get_security_summary.return_value = {
+                    "total_attacks": 5,
+                    "blocked_ips": 3,
+                    "recent_incidents": 2
+                }
+                # Disable rate limiting
+                mock_monitor.check_rate_limiting.return_value = False
+                mock_monitor.is_suspicious_ip.return_value = False
+                mock_monitor.check_path_traversal.return_value = False
+                
+                headers = {"X-Admin-Key": "test-admin-key"}
+                response = client.get("/api/security-status", headers=headers)
+                
+                assert response.status_code == 200
+                data = response.get_json()
+                assert "security_summary" in data
+                assert "timestamp" in data
+                assert data["security_summary"]["total_attacks"] == 5
+
+    def test_security_status_unauthorized(self, client: FlaskClient, app: Flask):
+        """Test security status with invalid admin key."""
+        with patch.dict(os.environ, {'RMAP_ADMIN_KEY': 'test-admin-key'}):
+            app.config["RMAP_ADMIN_KEY"] = "test-admin-key"
+            
+            with patch('server.src.server.security_monitor') as mock_monitor:
+                # Disable rate limiting
+                mock_monitor.check_rate_limiting.return_value = False
+                mock_monitor.is_suspicious_ip.return_value = False
+                mock_monitor.check_path_traversal.return_value = False
+                
+                headers = {"X-Admin-Key": "wrong-key"}
+                response = client.get("/api/security-status", headers=headers)
+                
+                assert response.status_code == 401
+                data = response.get_json()
+                assert "error" in data
+                assert "Unauthorized" in data["error"]
+
+    def test_security_status_no_key(self, client: FlaskClient, app: Flask):
+        """Test security status without admin key."""
+        with patch.dict(os.environ, {'RMAP_ADMIN_KEY': 'test-admin-key'}):
+            app.config["RMAP_ADMIN_KEY"] = "test-admin-key"
+            
+            with patch('server.src.server.security_monitor') as mock_monitor:
+                # Disable rate limiting
+                mock_monitor.check_rate_limiting.return_value = False
+                mock_monitor.is_suspicious_ip.return_value = False
+                mock_monitor.check_path_traversal.return_value = False
+                
+                response = client.get("/api/security-status")
+                
+                assert response.status_code == 401
+                data = response.get_json()
+                assert "error" in data
+                assert "Unauthorized" in data["error"]
+
+    def test_security_recover_success(self, client: FlaskClient, app: Flask):
+        """Test successful security recovery."""
+        with patch.dict(os.environ, {'RMAP_ADMIN_KEY': 'test-admin-key'}):
+            app.config["RMAP_ADMIN_KEY"] = "test-admin-key"
+            
+            with patch('server.src.server.security_monitor') as mock_monitor:
+                mock_monitor.recover_from_attack.return_value = {
+                    "recovery_actions": ["cleared_ip", "reset_counters"],
+                    "success": True
+                }
+                # Disable rate limiting
+                mock_monitor.check_rate_limiting.return_value = False
+                mock_monitor.is_suspicious_ip.return_value = False
+                mock_monitor.check_path_traversal.return_value = False
+                
+                headers = {"X-Admin-Key": "test-admin-key"}
+                data = {
+                    "ip": "192.168.1.100",
+                    "attack_type": "brute_force"
+                }
+                response = client.post("/api/security-recover", headers=headers, json=data)
+                
+                assert response.status_code == 200
+                result = response.get_json()
+                assert "recovery_result" in result
+                assert "timestamp" in result
+                assert result["recovery_result"]["success"] is True
+
+    def test_security_recover_unauthorized(self, client: FlaskClient, app: Flask):
+        """Test security recovery with invalid admin key."""
+        with patch.dict(os.environ, {'RMAP_ADMIN_KEY': 'test-admin-key'}):
+            app.config["RMAP_ADMIN_KEY"] = "test-admin-key"
+            
+            with patch('server.src.server.security_monitor') as mock_monitor:
+                # Disable rate limiting
+                mock_monitor.check_rate_limiting.return_value = False
+                mock_monitor.is_suspicious_ip.return_value = False
+                mock_monitor.check_path_traversal.return_value = False
+                
+                headers = {"X-Admin-Key": "wrong-key"}
+                data = {"ip": "192.168.1.100", "attack_type": "brute_force"}
+                response = client.post("/api/security-recover", headers=headers, json=data)
+                
+                assert response.status_code == 401
+                data = response.get_json()
+                assert "error" in data
+                assert "Unauthorized" in data["error"]
+
+    def test_security_incidents_success(self, client: FlaskClient, app: Flask):
+        """Test successful security incidents retrieval."""
+        with patch.dict(os.environ, {'RMAP_ADMIN_KEY': 'test-admin-key'}):
+            app.config["RMAP_ADMIN_KEY"] = "test-admin-key"
+            
+            with patch('server.src.server.security_monitor') as mock_monitor:
+                mock_incidents = [
+                    {"id": 1, "ip": "192.168.1.100", "attack_type": "brute_force", "timestamp": "2023-01-01T12:00:00Z"},
+                    {"id": 2, "ip": "192.168.1.101", "attack_type": "sql_injection", "timestamp": "2023-01-01T13:00:00Z"}
+                ]
+                mock_monitor.get_attack_incidents.return_value = mock_incidents
+                # Disable rate limiting
+                mock_monitor.check_rate_limiting.return_value = False
+                mock_monitor.is_suspicious_ip.return_value = False
+                mock_monitor.check_path_traversal.return_value = False
+                
+                headers = {"X-Admin-Key": "test-admin-key"}
+                response = client.get("/api/security-incidents", headers=headers)
+                
+                assert response.status_code == 200
+                data = response.get_json()
+                assert "incidents" in data
+                assert "total_count" in data
+                assert "timestamp" in data
+                assert len(data["incidents"]) == 2
+
+    def test_security_incidents_with_limit(self, client: FlaskClient, app: Flask):
+        """Test security incidents with custom limit."""
+        with patch.dict(os.environ, {'RMAP_ADMIN_KEY': 'test-admin-key'}):
+            app.config["RMAP_ADMIN_KEY"] = "test-admin-key"
+            
+            with patch('server.src.server.security_monitor') as mock_monitor:
+                mock_incidents = [{"id": 1, "ip": "192.168.1.100", "attack_type": "brute_force"}]
+                mock_monitor.get_attack_incidents.return_value = mock_incidents
+                # Disable rate limiting
+                mock_monitor.check_rate_limiting.return_value = False
+                mock_monitor.is_suspicious_ip.return_value = False
+                mock_monitor.check_path_traversal.return_value = False
+                
+                headers = {"X-Admin-Key": "test-admin-key"}
+                response = client.get("/api/security-incidents?limit=10", headers=headers)
+                
+                assert response.status_code == 200
+                mock_monitor.get_attack_incidents.assert_called_once_with(10)
+
+    def test_security_incidents_unauthorized(self, client: FlaskClient, app: Flask):
+        """Test security incidents with invalid admin key."""
+        with patch.dict(os.environ, {'RMAP_ADMIN_KEY': 'test-admin-key'}):
+            app.config["RMAP_ADMIN_KEY"] = "test-admin-key"
+            
+            with patch('server.src.server.security_monitor') as mock_monitor:
+                # Disable rate limiting
+                mock_monitor.check_rate_limiting.return_value = False
+                mock_monitor.is_suspicious_ip.return_value = False
+                mock_monitor.check_path_traversal.return_value = False
+                
+                headers = {"X-Admin-Key": "wrong-key"}
+                response = client.get("/api/security-incidents", headers=headers)
+                
+                assert response.status_code == 401
+                data = response.get_json()
+                assert "error" in data
+                assert "Unauthorized" in data["error"]
+
+    def test_security_analysis_success(self, client: FlaskClient, app: Flask):
+        """Test successful security analysis."""
+        with patch.dict(os.environ, {'RMAP_ADMIN_KEY': 'test-admin-key'}):
+            app.config["RMAP_ADMIN_KEY"] = "test-admin-key"
+            
+            with patch('server.src.server.security_monitor') as mock_monitor:
+                mock_analysis = {
+                    "attack_patterns": ["brute_force", "sql_injection"],
+                    "risk_level": "high",
+                    "recommendations": ["enable_rate_limiting", "update_firewall_rules"]
+                }
+                mock_monitor.analyze_attack_patterns.return_value = mock_analysis
+                # Disable rate limiting
+                mock_monitor.check_rate_limiting.return_value = False
+                mock_monitor.is_suspicious_ip.return_value = False
+                mock_monitor.check_path_traversal.return_value = False
+                
+                headers = {"X-Admin-Key": "test-admin-key"}
+                response = client.get("/api/security-analysis", headers=headers)
+                
+                assert response.status_code == 200
+                data = response.get_json()
+                assert "analysis" in data
+                assert "timestamp" in data
+                assert data["analysis"]["risk_level"] == "high"
+
+    def test_security_analysis_unauthorized(self, client: FlaskClient, app: Flask):
+        """Test security analysis with invalid admin key."""
+        with patch.dict(os.environ, {'RMAP_ADMIN_KEY': 'test-admin-key'}):
+            app.config["RMAP_ADMIN_KEY"] = "test-admin-key"
+            
+            with patch('server.src.server.security_monitor') as mock_monitor:
+                # Disable rate limiting
+                mock_monitor.check_rate_limiting.return_value = False
+                mock_monitor.is_suspicious_ip.return_value = False
+                mock_monitor.check_path_traversal.return_value = False
+                
+                headers = {"X-Admin-Key": "wrong-key"}
+                response = client.get("/api/security-analysis", headers=headers)
+                
+                assert response.status_code == 401
+                data = response.get_json()
+                assert "error" in data
+                assert "Unauthorized" in data["error"]
