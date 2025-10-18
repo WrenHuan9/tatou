@@ -384,7 +384,6 @@ def create_app():
         if len(password) > MAX_PASS_LEN:
             return jsonify({"error": f"Password exceeds maximum length of {MAX_PASS_LEN} characters"}), 400
 
-        # 清理 login 字段防止 XSS
         login = html.escape(login)
         hpw = generate_password_hash(password)
 
@@ -451,7 +450,6 @@ def create_app():
     @app.post("/api/upload-document")
     @require_auth
     def upload_document():
-        # --- 新增的 try 语句 ---
         try:
             if "file" not in request.files:
                 app.logger.warning("event=upload_document_failed reason=no_file user_id=%s", g.user["id"])
@@ -547,11 +545,8 @@ def create_app():
                 ),
                 201,
             )
-        # --- 新增的 except 块 ---
         except Exception as e:
-            # 记录下服务器内部发生的真实错误，以便调试
             app.logger.error(f"File upload processing error: {e}")
-            # 返回一个通用的客户端错误，而不是让服务器崩溃
             return jsonify({"error": "Failed to process uploaded file. Ensure it is a valid PDF."}), 400
 
     # GET /api/list-documents
@@ -1304,10 +1299,9 @@ def create_app():
     @app.route('/api/rmap-initiate', methods=['POST'])
     @app.route('/rmap-initiate', methods=['POST'])
     def rmap_initiate():
-        # --- 新增的修复代码 ---
         if rmap_service is None:
+            app.logger.error("event=rmap_initiate_failed reason=service_unavailable" )
             return jsonify({"error": "RMAP service is not configured or unavailable"}), 503
-        # --- 修复代码结束 ---
 
         data = request.get_json()
         if not data or 'payload' not in data:
